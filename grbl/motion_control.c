@@ -218,9 +218,17 @@ void mc_homing_cycle(uint8_t cycle_mask)
 
   limits_disable(); // Disable hard limits pin change register for cycle duration
 
+  // If TMC2209 UART comms failed at init, block homing rather than proceed silently.
+  #if defined(TMC2209_SENSORLESS_HOMING) && defined(TMC2209_ALARM_ON_FAIL)
+    if (!tmc2209_axis_ok(X_AXIS) || !tmc2209_axis_ok(Y_AXIS)) {
+      system_set_exec_alarm(EXEC_ALARM_TMC2209_FAIL);
+      return;
+    }
+  #endif
+
   // -------------------------------------------------------------------------------------
   // Perform homing routine. NOTE: Special motion case. Only system reset works.
-  
+
   #ifdef HOMING_SINGLE_AXIS_COMMANDS
     if (cycle_mask) { limits_go_home(cycle_mask); } // Perform homing cycle based on mask.
     else

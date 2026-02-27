@@ -678,6 +678,11 @@
   #define DEFAULT_TMC_X_FEED_SGTHRS  60    // $41  X slow-locate threshold (more sensitive)
   #define DEFAULT_TMC_Y_SEEK_SGTHRS  30    // $42  Y fast-approach threshold
   #define DEFAULT_TMC_Y_FEED_SGTHRS  60    // $43  Y slow-locate threshold
+
+  // If defined, homing is blocked (ALARM:10) when any TMC2209 axis driver fails to
+  // communicate at startup. Comment out to allow homing to proceed regardless (the
+  // DIAG/limit pin will still be read, so a mis-wired driver just won't trigger stall).
+  #define TMC2209_ALARM_ON_FAIL
 #endif // CPU_MAP_2560_RAMPS_BOARD
 
 

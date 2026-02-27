@@ -39,6 +39,11 @@
 #define TMC_RX_TIMEOUT_LOOPS  3000
 
 // ---------------------------------------------------------------------------
+// Per-axis initialisation result (set by tmc2209_init, read by tmc2209_axis_ok)
+// ---------------------------------------------------------------------------
+static bool tmc_init_ok[2] = {false, false};
+
+// ---------------------------------------------------------------------------
 // Axis-indexed pin accessors
 // ---------------------------------------------------------------------------
 typedef struct {
@@ -266,8 +271,15 @@ bool tmc2209_init(uint8_t axis)
         ok = (ver == TMC2209_VERSION);
     }
 
+    tmc_init_ok[axis] = ok;
     tmc_report(axis, ok);
     return ok;
+}
+
+bool tmc2209_axis_ok(uint8_t axis)
+{
+    if (axis > 1) { return false; }
+    return tmc_init_ok[axis];
 }
 
 void tmc2209_homing_start(uint8_t axis)

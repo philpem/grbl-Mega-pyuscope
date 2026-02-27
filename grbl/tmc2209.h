@@ -96,5 +96,9 @@ void tmc2209_set_sgthrs(uint8_t axis, uint8_t phase);
 // SGTHRS=0) and re-enable StealthChop (TPWMTHRS=TMC2209_TPWMTHRS_NORMAL).
 void tmc2209_homing_end(uint8_t axis);
 
+// Returns true if the last tmc2209_init() call for this axis succeeded.
+// Used by mc_homing_cycle() to gate homing when TMC2209_ALARM_ON_FAIL is set.
+bool tmc2209_axis_ok(uint8_t axis);
+
 #endif // TMC2209_SENSORLESS_HOMING
 #endif // tmc2209_h

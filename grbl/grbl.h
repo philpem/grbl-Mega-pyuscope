@@ -61,6 +61,9 @@
 #include "stepper.h"
 #include "jog.h"
 #include "sleep.h"
+#ifdef TMC2209_SENSORLESS_HOMING
+  #include "tmc2209.h"
+#endif
 
 // ---------------------------------------------------------------------------------------
 // COMPILE-TIME ERROR CHECKING OF DEFINE VALUES:

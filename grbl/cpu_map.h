@@ -240,8 +240,17 @@
   #define CONTROL_DDR       DDRK
   #define CONTROL_PIN       PINK
   #define CONTROL_PORT      PORTK
-  #define CONTROL_RESET_BIT         1  // Pin A9 - RAMPS Aux 2 Port
-  #define CONTROL_FEED_HOLD_BIT     2  // Pin A10 - RAMPS Aux 2 Port
+  // When TMC2209 sensorless homing is enabled, A9 (PK1) and A10 (PK2) are
+  // repurposed as UART RX lines for the X and Y drivers respectively.
+  // RESET and FEED_HOLD are remapped to A13 (PK5) and A14 (PK6), which are
+  // also on AUX-2 so the same PORTK / PCIE2 interrupt continues to work.
+  #ifdef TMC2209_SENSORLESS_HOMING
+    #define CONTROL_RESET_BIT         5  // Pin A13 - AUX-2 (remapped from A9)
+    #define CONTROL_FEED_HOLD_BIT     6  // Pin A14 - AUX-2 (remapped from A10)
+  #else
+    #define CONTROL_RESET_BIT         1  // Pin A9  - RAMPS Aux 2 Port
+    #define CONTROL_FEED_HOLD_BIT     2  // Pin A10 - RAMPS Aux 2 Port
+  #endif
   #define CONTROL_CYCLE_START_BIT   3  // Pin A11 - RAMPS Aux 2 Port
   #define CONTROL_SAFETY_DOOR_BIT   4  // Pin A12 - RAMPS Aux 2 Port
   #define CONTROL_INT       PCIE2  // Pin change interrupt enable pin
@@ -280,7 +289,30 @@
   // Define spindle output pins.
   #define SPINDLE_PWM_DDR   DDRH
   #define SPINDLE_PWM_PORT  PORTH
-  #define SPINDLE_PWM_BIT   5 // MEGA2560 Digital Pin 8 
+  #define SPINDLE_PWM_BIT   5 // MEGA2560 Digital Pin 8
+
+  // TMC2209 single-wire software UART pins (AUX-2 connector).
+  // A 1k resistor must be fitted between each TX and RX pair.
+  // The driver MS3 pin must be jumpered to its RX pin to connect PDN_UART.
+  #ifdef TMC2209_SENSORLESS_HOMING
+    // X axis: TX = D40 (PG1), RX = A9 (PK1)
+    #define TMC_X_TX_DDR    DDRG
+    #define TMC_X_TX_PORT   PORTG
+    #define TMC_X_TX_BIT    1
+    #define TMC_X_RX_DDR    DDRK
+    #define TMC_X_RX_PORT   PORTK
+    #define TMC_X_RX_PIN    PINK
+    #define TMC_X_RX_BIT    1
+
+    // Y axis: TX = A5 (PF5), RX = A10 (PK2)
+    #define TMC_Y_TX_DDR    DDRF
+    #define TMC_Y_TX_PORT   PORTF
+    #define TMC_Y_TX_BIT    5
+    #define TMC_Y_RX_DDR    DDRK
+    #define TMC_Y_RX_PORT   PORTK
+    #define TMC_Y_RX_PIN    PINK
+    #define TMC_Y_RX_BIT    2
+  #endif // TMC2209_SENSORLESS_HOMING
 
 #endif
 /* 

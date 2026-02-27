@@ -34,12 +34,12 @@
 // NOTE: OEMs can avoid the need to maintain/update the defaults.h and cpu_map.h files and use only
 // one configuration file by placing their specific defaults and pin map at the bottom of this file.
 // If doing so, simply comment out these two defines and see instructions below.
-#define DEFAULTS_GENERIC
-#define CPU_MAP_2560_INITIAL
+// #define DEFAULTS_GENERIC
+// #define CPU_MAP_2560_INITIAL
 
-// To use with RAMPS 1.4 Board, comment out the above defines and uncomment the next two defines
-// #define DEFAULTS_RAMPS_BOARD
-// #define CPU_MAP_2560_RAMPS_BOARD
+// RAMPS 1.4 / MKS GEN V1.4 board (RAMPS 1.4 compatible)
+#define DEFAULTS_RAMPS_BOARD
+#define CPU_MAP_2560_RAMPS_BOARD
 
 // Serial baud rate
 // #define BAUD_RATE 230400
@@ -635,6 +635,50 @@
 // Paste CPU_MAP definitions here.
 
 // Paste default settings definitions here.
+
+
+/* ---------------------------------------------------------------------------------------
+   TMC2209 Sensorless Homing Configuration
+
+   Requires hardware wiring on MKS GEN V1.4 AUX-2 connector:
+     X axis: 1k between D40(TX) and A9(RX); jumper from X driver MS3 to A9
+     Y axis: 1k between A5(TX) and A10(RX); jumper from Y driver MS3 to A10
+     X DIAG output wired to X MIN limit input (D3)
+     Y DIAG output wired to Y MIN limit input (D14)
+
+   The UART address (0-3) is set by the driver's MS1/MS2 pins.
+   Z axis retains its physical limit switch; no sensorless homing for Z.
+*/
+#ifdef CPU_MAP_2560_RAMPS_BOARD
+  #define TMC2209_SENSORLESS_HOMING         // Master enable; comment out to disable
+
+  #define TMC2209_BAUD_RATE        19200    // Software UART baud rate (chip auto-detects)
+  #define TMC2209_X_ADDR           0        // X driver UART address (set by MS1/MS2)
+  #define TMC2209_Y_ADDR           0        // Y driver UART address (set by MS1/MS2)
+
+  // Motor current: 0-31 scale (31 = 100% of driver's Vref-set current)
+  // Microscope stages typically use small motors; start conservative and tune up.
+  #define TMC2209_IRUN             16       // Run current (~50% of max)
+  #define TMC2209_IHOLD            4        // Hold current (~12%); reduces heat/vibration
+
+  // TCOOLTHRS: stepper TSTEP ticks below which stallGuard/CoolStep are active.
+  // 0xFFFFF = no upper speed limit, so stallGuard fires at any speed during homing.
+  #define TMC2209_TCOOLTHRS        0xFFFFF
+
+  // TPWMTHRS: motor speed above which driver switches from StealthChop to SpreadCycle.
+  // stallGuard ONLY works in SpreadCycle; TPWMTHRS is set to 0 during homing (forcing
+  // SpreadCycle) and restored to this value afterwards for quiet normal operation.
+  // ~300 = quiet below ~500 mm/min (tune to your steps/mm and desired speed range).
+  #define TMC2209_TPWMTHRS_NORMAL  300
+
+  // Default stallGuard thresholds: 0-255, higher = less sensitive (harder stall needed).
+  // These are EEPROM defaults only; tune at runtime with $40/$41 (X) and $42/$43 (Y).
+  // Light microscope stages stall at lower forces; start low and increase if false-stalling.
+  #define DEFAULT_TMC_X_SEEK_SGTHRS  30    // $40  X fast-approach threshold
+  #define DEFAULT_TMC_X_FEED_SGTHRS  60    // $41  X slow-locate threshold (more sensitive)
+  #define DEFAULT_TMC_Y_SEEK_SGTHRS  30    // $42  Y fast-approach threshold
+  #define DEFAULT_TMC_Y_FEED_SGTHRS  60    // $43  Y slow-locate threshold
+#endif // CPU_MAP_2560_RAMPS_BOARD
 
 
 #endif

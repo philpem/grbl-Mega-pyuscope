@@ -227,12 +227,36 @@ void mc_homing_cycle(uint8_t cycle_mask)
   #endif
   {
     // Search to engage all axes limit switches at faster homing seek rate.
+    #ifdef TMC2209_SENSORLESS_HOMING
+      if (HOMING_CYCLE_0 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+      if (HOMING_CYCLE_0 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+    #endif
     limits_go_home(HOMING_CYCLE_0);  // Homing cycle 0
+    #ifdef TMC2209_SENSORLESS_HOMING
+      tmc2209_homing_end(X_AXIS);
+      tmc2209_homing_end(Y_AXIS);
+    #endif
     #ifdef HOMING_CYCLE_1
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (HOMING_CYCLE_1 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+        if (HOMING_CYCLE_1 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #endif
       limits_go_home(HOMING_CYCLE_1);  // Homing cycle 1
+      #ifdef TMC2209_SENSORLESS_HOMING
+        tmc2209_homing_end(X_AXIS);
+        tmc2209_homing_end(Y_AXIS);
+      #endif
     #endif
     #ifdef HOMING_CYCLE_2
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (HOMING_CYCLE_2 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+        if (HOMING_CYCLE_2 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #endif
       limits_go_home(HOMING_CYCLE_2);  // Homing cycle 2
+      #ifdef TMC2209_SENSORLESS_HOMING
+        tmc2209_homing_end(X_AXIS);
+        tmc2209_homing_end(Y_AXIS);
+      #endif
     #endif
   }
 

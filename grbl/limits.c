@@ -69,6 +69,12 @@ void limits_init()
         WDTCSR = (1<<WDP0); // Set time-out at ~32msec.
       #endif
     #endif // DISABLE_HW_LIMITS
+    #ifdef TMC2209_SENSORLESS_HOMING
+      // Initialise TMC2209 drivers for sensorless homing on X and Y axes.
+      // Reports [MSG:TMC2209 X OK/FAIL] on the serial port for each axis.
+      tmc2209_init(X_AXIS);
+      tmc2209_init(Y_AXIS);
+    #endif
   #else
     LIMIT_DDR &= ~(LIMIT_MASK); // Set as input pins
 
@@ -383,6 +389,12 @@ void limits_go_home(uint8_t cycle_mask)
       if (approach) {
         max_travel = settings.homing_pulloff*HOMING_AXIS_LOCATE_SCALAR;
         homing_rate = settings.homing_feed_rate;
+        #ifdef TMC2209_SENSORLESS_HOMING
+          // Entering the slow locate pass: switch to the (more sensitive) feed-phase
+          // stallGuard threshold for each axis that is part of this homing cycle.
+          if (cycle_mask & (1<<X_AXIS)) { tmc2209_set_sgthrs(X_AXIS, TMC_PHASE_FEED); }
+          if (cycle_mask & (1<<Y_AXIS)) { tmc2209_set_sgthrs(Y_AXIS, TMC_PHASE_FEED); }
+        #endif
       } else {
         max_travel = settings.homing_pulloff;
         homing_rate = settings.homing_seek_rate;

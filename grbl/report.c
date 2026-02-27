@@ -204,6 +204,12 @@ void report_grbl_settings() {
   report_util_float_setting(30,settings.rpm_max,N_DECIMAL_RPMVALUE);
   report_util_float_setting(31,settings.rpm_min,N_DECIMAL_RPMVALUE);
   report_util_uint8_setting(32,bit_istrue(settings.flags,BITFLAG_LASER_MODE));
+  #ifdef TMC2209_SENSORLESS_HOMING
+  report_util_uint8_setting(40,settings.tmc_sgthrs[0][0]);
+  report_util_uint8_setting(41,settings.tmc_sgthrs[0][1]);
+  report_util_uint8_setting(42,settings.tmc_sgthrs[1][0]);
+  report_util_uint8_setting(43,settings.tmc_sgthrs[1][1]);
+  #endif
   // Print axis settings
   uint8_t idx, set_idx;
   uint8_t val = AXIS_SETTINGS_START_VAL;

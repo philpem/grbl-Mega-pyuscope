@@ -57,7 +57,14 @@ const __flash settings_t defaults = {\
     .acceleration[Z_AXIS] = DEFAULT_Z_ACCELERATION,
     .max_travel[X_AXIS] = (-DEFAULT_X_MAX_TRAVEL),
     .max_travel[Y_AXIS] = (-DEFAULT_Y_MAX_TRAVEL),
-    .max_travel[Z_AXIS] = (-DEFAULT_Z_MAX_TRAVEL)};
+    .max_travel[Z_AXIS] = (-DEFAULT_Z_MAX_TRAVEL),
+    #ifdef TMC2209_SENSORLESS_HOMING
+    .tmc_sgthrs = {
+      {DEFAULT_TMC_X_SEEK_SGTHRS, DEFAULT_TMC_X_FEED_SGTHRS},  // X axis: [seek, feed]
+      {DEFAULT_TMC_Y_SEEK_SGTHRS, DEFAULT_TMC_Y_FEED_SGTHRS},  // Y axis: [seek, feed]
+    },
+    #endif
+    };
 
 
 // Method to store startup lines into EEPROM
@@ -290,6 +297,12 @@ uint8_t settings_store_global_setting(uint8_t parameter, float value) {
         if (int_value) { settings.flags |= BITFLAG_LASER_MODE; }
         else { settings.flags &= ~BITFLAG_LASER_MODE; }
         break;
+      #ifdef TMC2209_SENSORLESS_HOMING
+      case 40: settings.tmc_sgthrs[0][0] = int_value; break;  // X seek stallGuard threshold
+      case 41: settings.tmc_sgthrs[0][1] = int_value; break;  // X feed stallGuard threshold
+      case 42: settings.tmc_sgthrs[1][0] = int_value; break;  // Y seek stallGuard threshold
+      case 43: settings.tmc_sgthrs[1][1] = int_value; break;  // Y feed stallGuard threshold
+      #endif
       default:
         return(STATUS_INVALID_STATEMENT);
     }

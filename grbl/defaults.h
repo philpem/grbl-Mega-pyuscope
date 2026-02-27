@@ -453,46 +453,51 @@
 #endif
 
 #ifdef DEFAULTS_RAMPS_BOARD
-  // Generic conservative settings for a RAMP CNC machine. You must update these yourself. 
-  // Keep in mind that Grbl is highly efficient and settings can be significantly different.
-  // Especially when optimizing for a different CNC task like going from 3d printing to 
-  // CNC milling or laser cutting. Unlike Marlin, these defaults are only applied when the 
-  // EEPROM is explicitly wiped, either by a `$RST=*` command or Grbl detecting a settings
-  // version type change (not frequent).
-  #define DEFAULT_X_STEPS_PER_MM 80.0
-  #define DEFAULT_Y_STEPS_PER_MM 80.0
-  #define DEFAULT_Z_STEPS_PER_MM 80.0
-  #define DEFAULT_X_MAX_RATE 2500.0 // mm/min
-  #define DEFAULT_Y_MAX_RATE 2500.0 // mm/min
-  #define DEFAULT_Z_MAX_RATE 500.0 // mm/min
-  #define DEFAULT_X_ACCELERATION (100.0*60.0*60.0) // 10*60*60 mm/min^2 = 10 mm/sec^2
-  #define DEFAULT_Y_ACCELERATION (100.0*60.0*60.0) // 10*60*60 mm/min^2 = 10 mm/sec^2
-  #define DEFAULT_Z_ACCELERATION (100.0*60.0*60.0) // 10*60*60 mm/min^2 = 10 mm/sec^2
-  #define DEFAULT_X_MAX_TRAVEL 200.0 // mm
-  #define DEFAULT_Y_MAX_TRAVEL 200.0 // mm
-  #define DEFAULT_Z_MAX_TRAVEL 200.0 // mm
+  // Defaults tuned for a CNC microscope stage (X/Y pan, Z focus) with TMC2209
+  // drivers and sensorless X/Y homing. All values are applied only when EEPROM
+  // is wiped ($RST=* or firmware version change); tune further via $-commands.
+  //
+  // Steps/mm assumes 200-step motor, 1/16 microstepping (TMC2209 default via
+  // MS1=MS2=0), and 2 mm pitch lead screw: 200 * 16 / 2 = 1600 steps/mm.
+  // Adjust to match your actual mechanism.
+  #define DEFAULT_X_STEPS_PER_MM 1600.0
+  #define DEFAULT_Y_STEPS_PER_MM 1600.0
+  #define DEFAULT_Z_STEPS_PER_MM 1600.0
+  // Max rates: conservative for a delicate microscope stage.
+  #define DEFAULT_X_MAX_RATE 500.0  // mm/min
+  #define DEFAULT_Y_MAX_RATE 500.0  // mm/min
+  #define DEFAULT_Z_MAX_RATE 100.0  // mm/min (focus axis: extra cautious)
+  // Accelerations: gentle to protect stage mechanics and prevent false stalls.
+  #define DEFAULT_X_ACCELERATION (20.0*60.0*60.0) // 20 mm/sec^2
+  #define DEFAULT_Y_ACCELERATION (20.0*60.0*60.0) // 20 mm/sec^2
+  #define DEFAULT_Z_ACCELERATION  (5.0*60.0*60.0) //  5 mm/sec^2 (focus axis)
+  // Travel limits: set to actual physical stage travel. Tune to your machine.
+  #define DEFAULT_X_MAX_TRAVEL 100.0 // mm
+  #define DEFAULT_Y_MAX_TRAVEL 100.0 // mm
+  #define DEFAULT_Z_MAX_TRAVEL  50.0 // mm
   #define DEFAULT_SPINDLE_RPM_MAX 1000.0 // rpm
   #define DEFAULT_SPINDLE_RPM_MIN 0.0 // rpm
   #define DEFAULT_STEP_PULSE_MICROSECONDS 10
   #define DEFAULT_STEPPING_INVERT_MASK 0
   #define DEFAULT_DIRECTION_INVERT_MASK 0
-  #define DEFAULT_STEPPER_IDLE_LOCK_TIME 255 // msec (0-254, 255 keeps steppers enabled)
+  #define DEFAULT_STEPPER_IDLE_LOCK_TIME 255 // msec (255 = steppers always enabled)
   #define DEFAULT_STATUS_REPORT_MASK 1 // MPos enabled
-  #define DEFAULT_JUNCTION_DEVIATION 0.02 // mm
+  #define DEFAULT_JUNCTION_DEVIATION 0.01 // mm
   #define DEFAULT_ARC_TOLERANCE 0.002 // mm
   #define DEFAULT_REPORT_INCHES 0 // false
   #define DEFAULT_INVERT_ST_ENABLE 0 // false
   #define DEFAULT_INVERT_LIMIT_PINS 0 // false
-  #define DEFAULT_SOFT_LIMIT_ENABLE 0 // true
-  #define DEFAULT_HARD_LIMIT_ENABLE 0  // false
+  #define DEFAULT_SOFT_LIMIT_ENABLE 1 // true — prevents overtravel damaging optics
+  #define DEFAULT_HARD_LIMIT_ENABLE 0 // false (DISABLE_HW_LIMITS set for RAMPS)
   #define DEFAULT_INVERT_PROBE_PIN 0 // false
   #define DEFAULT_LASER_MODE 0 // false
-  #define DEFAULT_HOMING_ENABLE 0  // true
-  #define DEFAULT_HOMING_DIR_MASK 0 // move positive dir
-  #define DEFAULT_HOMING_FEED_RATE 500.0 // mm/min
-  #define DEFAULT_HOMING_SEEK_RATE 2000.0 // mm/min
-  #define DEFAULT_HOMING_DEBOUNCE_DELAY 250 // msec (0-65k)
-  #define DEFAULT_HOMING_PULLOFF 1.0 // mm
+  #define DEFAULT_HOMING_ENABLE 1  // true — require homing before motion
+  #define DEFAULT_HOMING_DIR_MASK 0 // home toward minimum (DIAG/limit on MIN side)
+  // Homing rates: slow and gentle for a microscope stage.
+  #define DEFAULT_HOMING_FEED_RATE  50.0  // mm/min (slow locate pass)
+  #define DEFAULT_HOMING_SEEK_RATE  200.0 // mm/min (fast approach)
+  #define DEFAULT_HOMING_DEBOUNCE_DELAY 250 // msec
+  #define DEFAULT_HOMING_PULLOFF 0.5 // mm
 #endif
 
 #endif

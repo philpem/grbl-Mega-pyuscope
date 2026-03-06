@@ -38,6 +38,27 @@
 // Each iteration is ~5 µs (conservative); 15 ms / 5 µs = 3000 iterations.
 #define TMC_RX_TIMEOUT_LOOPS  3000
 
+// In single-wire UART mode the TMC2209 echoes every byte it receives back on
+// the same wire before sending a read reply.  We must account for these echo
+// bytes in both writes and reads:
+//
+//   Write (8 bytes TX) → IC echoes 8 bytes.  Echo starts after a 4-bit
+//   inter-frame gap and lasts (8 × 10) bit-periods.
+//
+//   Read request (4 bytes TX) → IC echoes 4 bytes, then sends 8-byte reply.
+//
+// For writes we add a post-TX delay (outside cli) so the echo clears before
+// the next register access.  Overlapping writes corrupt each other because
+// when the master's TX output is HIGH (idle) but the IC is echoing a 0 bit,
+// the 1 kΩ coupling lets the IC pull the shared line LOW, corrupting the next
+// byte.
+//
+// For reads we actively receive and discard the 4 echo bytes (inside cli)
+// then receive the real 8-byte reply.
+#define TMC_ECHO_GUARD_BITS   4                               // inter-frame gap before echo
+#define TMC_WRITE_ECHO_US     (TMC_BIT_US * (TMC_ECHO_GUARD_BITS + 8*10.0))  // 8-byte write echo
+#define TMC_READ_ECHO_US      (TMC_BIT_US * (TMC_ECHO_GUARD_BITS + 4*10.0))  // 4-byte read-req echo
+
 // ---------------------------------------------------------------------------
 // Per-axis initialisation result (set by tmc2209_init, read by tmc2209_axis_ok)
 // ---------------------------------------------------------------------------
@@ -170,6 +191,12 @@ void tmc2209_write_reg(uint8_t axis, uint8_t reg, uint32_t val)
     cli();
     for (uint8_t i = 0; i < 8; i++) { tmc_send_byte(ax, dgram[i]); }
     SREG = sreg;
+    // Wait for the IC's echo to finish before the next register access.
+    // The echo is open-drain on the shared wire; if the next TX starts while
+    // the echo is still in progress the IC's 0-bits pull down the line and
+    // corrupt the master's 1-bits.  This delay is outside cli() so the
+    // stepper ISR continues to fire normally.
+    _delay_us(TMC_WRITE_ECHO_US);
 }
 
 // ---------------------------------------------------------------------------
@@ -191,8 +218,9 @@ bool tmc2209_read_reg(uint8_t axis, uint8_t reg, uint32_t *val)
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
-    // TX is now idle (HIGH). Wait a few bit-periods for the driver to start responding.
-    _delay_us(TMC_BIT_US * 12);
+    // The IC echoes our 4-byte request before sending its 8-byte reply.
+    // Receive and discard those echo bytes so we are aligned on the real response.
+    { uint8_t dummy; for (uint8_t i = 0; i < 4; i++) { tmc_recv_byte(ax, &dummy); } }
     // Receive 8-byte response
     uint8_t resp[8];
     for (uint8_t i = 0; i < 8; i++) {

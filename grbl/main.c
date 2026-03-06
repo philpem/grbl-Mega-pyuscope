@@ -88,6 +88,9 @@ int main(void)
     serial_reset_read_buffer(); // Clear serial read buffer
     gc_init(); // Set g-code parser to default state
     spindle_init();
+    #ifdef LED_RED_DDR
+      led_init();   // Must be after spindle_init() since they share Timer 4
+    #endif
     coolant_init();
     limits_init();
     probe_init();

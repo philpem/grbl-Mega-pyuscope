@@ -34,12 +34,16 @@
 // NOTE: OEMs can avoid the need to maintain/update the defaults.h and cpu_map.h files and use only
 // one configuration file by placing their specific defaults and pin map at the bottom of this file.
 // If doing so, simply comment out these two defines and see instructions below.
-// #define DEFAULTS_GENERIC
-// #define CPU_MAP_2560_INITIAL
+//#define DEFAULTS_GENERIC
+//#define CPU_MAP_2560_INITIAL
 
-// RAMPS 1.4 / MKS GEN V1.4 board (RAMPS 1.4 compatible)
+// To use with RAMPS 1.4 Board, comment out the above defines and uncomment the next two defines
+//#define DEFAULTS_RAMPS_BOARD
+//#define CPU_MAP_2560_RAMPS_BOARD
+
+// To use with RAMPS 1.4 Board to control a microscope with Pyuscope, comment out the above defines and uncomment the next two defines
 #define DEFAULTS_RAMPS_BOARD
-#define CPU_MAP_2560_RAMPS_BOARD
+#define CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
 
 // Serial baud rate
 // #define BAUD_RATE 230400
@@ -649,7 +653,7 @@
    The UART address (0-3) is set by the driver's MS1/MS2 pins.
    Z axis retains its physical limit switch; no sensorless homing for Z.
 */
-#ifdef CPU_MAP_2560_RAMPS_BOARD
+#ifdef CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
   #define TMC2209_SENSORLESS_HOMING         // Master enable; comment out to disable
 
   #define TMC2209_BAUD_RATE        19200    // Software UART baud rate (chip auto-detects)
@@ -683,7 +687,7 @@
   // communicate at startup. Comment out to allow homing to proceed regardless (the
   // DIAG/limit pin will still be read, so a mis-wired driver just won't trigger stall).
   #define TMC2209_ALARM_ON_FAIL
-#endif // CPU_MAP_2560_RAMPS_BOARD
+#endif // CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
 
 
 #endif

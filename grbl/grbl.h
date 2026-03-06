@@ -64,6 +64,7 @@
 #ifdef TMC2209_SENSORLESS_HOMING
   #include "tmc2209.h"
 #endif
+#include "led_control.h"
 
 // ---------------------------------------------------------------------------------------
 // COMPILE-TIME ERROR CHECKING OF DEFINE VALUES:

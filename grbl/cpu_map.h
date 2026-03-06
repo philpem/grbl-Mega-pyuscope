@@ -409,7 +409,7 @@
   #define PROBE_MASK      (1<<PROBE_BIT)
 
   // Advanced Configuration Below You should not need to touch these variables
-  // Set Timer up to use TIMER4B which is attached to Digital Pin 8 - Ramps 1.4 12v output with heat sink
+  // Spindle (halogen lamp) PWM on Digital Pin 8 - Ramps 1.4 heated bed MOSFET (12v output with heat sink)
   #define SPINDLE_PWM_MAX_VALUE     1024.0 // Translates to about 1.9 kHz PWM frequency at 1/8 prescaler
   #ifndef SPINDLE_PWM_MIN_VALUE
   #define SPINDLE_PWM_MIN_VALUE   1   // Must be greater than zero.
@@ -417,27 +417,47 @@
   #define SPINDLE_PWM_OFF_VALUE     0
   #define SPINDLE_PWM_RANGE         (SPINDLE_PWM_MAX_VALUE-SPINDLE_PWM_MIN_VALUE)
 
-  //Control Digital Pin 6 which is Servo 2 signal pin on Ramps 1.4 board
+  // Timer 4: Spindle PWM on OCR4C (D8) and LED Green on OCR4A (D6)
+  // Uses WGM mode 14 (Fast PWM, TOP=ICR4) so both OCR4A and OCR4C are free for PWM output.
   #define SPINDLE_TCCRA_REGISTER    TCCR4A
   #define SPINDLE_TCCRB_REGISTER    TCCR4B
   #define SPINDLE_OCR_REGISTER      OCR4C
   #define SPINDLE_COMB_BIT          COM4C1
 
-  // 1/8 Prescaler, 16-bit Fast PWM mode
-  #define SPINDLE_TCCRA_INIT_MASK ((1<<WGM40) | (1<<WGM41))
-  #define SPINDLE_TCCRB_INIT_MASK ((1<<WGM42) | (1<<WGM43) | (1<<CS41)) 
-  #define SPINDLE_OCRA_REGISTER   OCR4A // 16-bit Fast PWM mode requires top reset value stored here.
-  #define SPINDLE_OCRA_TOP_VALUE  0x0400 // PWM counter reset value. Should be the same as PWM_MAX_VALUE in hex.
+  // 1/8 Prescaler, 16-bit Fast PWM mode 14 (TOP=ICR4)
+  #define SPINDLE_TCCRA_INIT_MASK   (1<<WGM41)
+  #define SPINDLE_TCCRB_INIT_MASK   ((1<<WGM42) | (1<<WGM43) | (1<<CS41))
+  #define SPINDLE_OCRA_REGISTER     ICR4  // TOP value stored in ICR4 (mode 14), freeing OCR4A for LED PWM
+  #define SPINDLE_OCRA_TOP_VALUE    0x0400 // PWM counter reset value. Should be the same as PWM_MAX_VALUE in hex.
 
   // Define spindle output pins.
   #define SPINDLE_PWM_DDR   DDRH
   #define SPINDLE_PWM_PORT  PORTH
-  #define SPINDLE_PWM_BIT   5 // MEGA2560 Digital Pin 8 
+  #define SPINDLE_PWM_BIT   5 // MEGA2560 Digital Pin 8
+
+  // Spindle enable and direction pins not defined for pyuscope lamp mode.
+  // D4 (Servo 4) and D5 (Servo 3) are freed for other use.
+  // D5 is reused for LED Red channel (Timer 3 OC3A).
+  // The halogen lamp only needs PWM on D8 (heated bed MOSFET).
+
+  // --- RGB LED pin definitions (active under LED_CONTROL_ENABLE) ---
+  // Red: D5 (PE3, Timer 3 OC3A) - Servo 3 header
+  #define LED_RED_DDR       DDRE
+  #define LED_RED_PORT      PORTE
+  #define LED_RED_BIT       3     // MEGA2560 Digital Pin 5
+  // Green: D6 (PH3, Timer 4 OC4A) - Servo 2 header
+  #define LED_GREEN_DDR     DDRH
+  #define LED_GREEN_PORT    PORTH
+  #define LED_GREEN_BIT     3     // MEGA2560 Digital Pin 6
+  // Blue: D45 (PL4, Timer 5 OC5B) - AUX-2 header
+  #define LED_BLUE_DDR      DDRL
+  #define LED_BLUE_PORT     PORTL
+  #define LED_BLUE_BIT      4     // MEGA2560 Digital Pin 45
 
 #endif
 
 
-/* 
+/*
 #ifdef CPU_MAP_CUSTOM_PROC
   // For a custom pin map or different processor, copy and edit one of the available cpu
   // map files and modify it to your needs. Make sure the defined name is also changed in

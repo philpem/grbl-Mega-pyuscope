@@ -65,6 +65,15 @@ void gc_sync_position()
 // coordinates, respectively.
 uint8_t gc_execute_line(char *line)
 {
+  // Intercept M150 (RGB LED control) before the main parser.
+  // M150 is a non-modal immediate command that doesn't fit the standard modal group system.
+  #ifdef LED_RED_DDR
+    if (line[0] == 'M' && line[1] == '1' && line[2] == '5' && line[3] == '0'
+        && (line[4] == 0 || line[4] == 'R' || line[4] == 'U' || line[4] == 'B')) {
+      return led_parse_m150(line);
+    }
+  #endif
+
   /* -------------------------------------------------------------------------------------
      STEP 1: Initialize parser block struct and copy current g-code state modes. The parser
      updates these modes and commands as the block line is parser and will only be used and

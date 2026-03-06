@@ -65,8 +65,15 @@ void led_init()
 }
 
 
+// Current LED state, so unspecified M150 parameters keep their value.
+static uint8_t led_red = 0, led_green = 0, led_blue = 0;
+
+
 void led_set_color(uint8_t red, uint8_t green, uint8_t blue)
 {
+  led_red = red;
+  led_green = green;
+  led_blue = blue;
   // Map 0-255 to 0-1024 PWM range (multiply by 4, with 255 mapping to 1024)
   uint16_t r_pwm = (uint16_t)red * 4;
   uint16_t g_pwm = (uint16_t)green * 4;
@@ -121,6 +128,10 @@ void led_set_color(uint8_t red, uint8_t green, uint8_t blue)
 
 void led_stop()
 {
+  led_red = 0;
+  led_green = 0;
+  led_blue = 0;
+
   // Turn all LEDs off.
   // For inverted channels: set OCR=TOP so pin stays HIGH (LED off), keep OC connected.
   // For non-inverted channels: disconnect OC so pin goes LOW (LED off).
@@ -163,8 +174,8 @@ static uint16_t parse_int(char **p)
 uint8_t led_parse_m150(char *line)
 {
   // line is already uppercase with spaces stripped by protocol layer.
-  // Expected format: "M150R<n>U<n>B<n>" (parameters optional, default to 0)
-  uint8_t red = 0, green = 0, blue = 0;
+  // Expected format: "M150R<n>U<n>B<n>" (omitted parameters keep current value)
+  uint8_t red = led_red, green = led_green, blue = led_blue;
 
   // Skip past "M150"
   char *p = line + 4;

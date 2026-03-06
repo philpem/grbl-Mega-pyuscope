@@ -244,24 +244,14 @@ bool tmc2209_read_reg(uint8_t axis, uint8_t reg, uint32_t *val)
 }
 
 // ---------------------------------------------------------------------------
-// Emit a short status message on the main serial port.
-// Format: "[MSG:TMC2209 X OK]\r\n" or "[MSG:TMC2209 X FAIL]\r\n"
+// Serial hex helper — writes one byte as two uppercase ASCII hex digits.
 // ---------------------------------------------------------------------------
-static void tmc_report(uint8_t axis, bool ok)
+static void tmc_write_hex8(uint8_t b)
 {
-    // "[MSG:TMC2209 "
-    serial_write('['); serial_write('M'); serial_write('S'); serial_write('G');
-    serial_write(':'); serial_write('T'); serial_write('M'); serial_write('C');
-    serial_write('2'); serial_write('2'); serial_write('0'); serial_write('9');
-    serial_write(' ');
-    serial_write(axis == 0 ? 'X' : 'Y');
-    serial_write(' ');
-    if (ok) {
-        serial_write('O'); serial_write('K');
-    } else {
-        serial_write('F'); serial_write('A'); serial_write('I'); serial_write('L');
-    }
-    serial_write(']'); serial_write('\r'); serial_write('\n');
+    const uint8_t hi = (b >> 4) & 0x0F;
+    const uint8_t lo =  b       & 0x0F;
+    serial_write(hi < 10 ? '0' + hi : 'A' + hi - 10);
+    serial_write(lo < 10 ? '0' + lo : 'A' + lo - 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,34 +263,112 @@ bool tmc2209_init(uint8_t axis)
     if (axis > 1) { return false; }
     const tmc_axis_t *ax = &tmc_axes[axis];
 
-    // Configure TX as output, idle HIGH
-    *ax->tx_ddr  |=  (1 << ax->tx_bit);
+    // --- Pin setup ----------------------------------------------------------
+    *ax->tx_ddr  |=  (1 << ax->tx_bit);   // TX: output, idle HIGH
     *ax->tx_port |=  (1 << ax->tx_bit);
-
-    // Configure RX as input with internal pull-up
-    *ax->rx_ddr  &= ~(1 << ax->rx_bit);
+    *ax->rx_ddr  &= ~(1 << ax->rx_bit);   // RX: input with pull-up
     *ax->rx_port |=  (1 << ax->rx_bit);
+    _delay_us(100);                        // let pull-up settle
 
-    // Allow pull-up to settle
-    _delay_us(100);
+    // --- Self-test: does TX LOW appear on RX? --------------------------------
+    // Drive TX LOW and check RX; if RX stays HIGH the 1k coupling or the
+    // RX→PDN_UART jumper is missing.  Restore TX HIGH before UART traffic.
+    cli();
+    *ax->tx_port &= ~(1 << ax->tx_bit);   // TX LOW
+    _delay_us(5);
+    bool loopback_ok = !(*ax->rx_pin & (1 << ax->rx_bit));  // RX should be LOW
+    *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (idle)
+    sei();
 
-    // Enable UART control: PDN_DISABLE=1, I_SCALE_ANALOG=0
+    // --- Configure driver via UART ------------------------------------------
     tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
-
-    // Set motor current
     tmc2209_write_reg(axis, TMC_REG_IHOLD_IRUN,
         TMC_IHOLD_IRUN_VAL(TMC2209_IHOLD, TMC2209_IRUN, 6));
 
-    // Verify chip identity by reading IOIN; version byte (bits 31:24) must be 0x21
-    uint32_t ioin = 0;
-    bool ok = tmc2209_read_reg(axis, TMC_REG_IOIN, &ioin);
-    if (ok) {
-        uint8_t ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
-        ok = (ver == TMC2209_VERSION);
+    // --- Read IOIN: capture all bytes for diagnostics -----------------------
+    // We send the 4-byte request, read back 4 echo bytes then the 8-byte reply,
+    // storing everything so the diagnostic message can show exactly what failed.
+    uint8_t req[4];
+    req[0] = 0x05;
+    req[1] = ax->addr;
+    req[2] = TMC_REG_IOIN & 0x7F;
+    req[3] = tmc_crc8(req, 3);
+
+    uint8_t echo_buf[4] = {0, 0, 0, 0};
+    uint8_t resp_buf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int8_t  echo_fail = -1;   // index of first timed-out echo byte, or -1 = all OK
+    int8_t  resp_fail = -1;   // index of first timed-out response byte, or -1 = all OK
+
+    uint8_t sreg = SREG;
+    cli();
+    for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
+    for (uint8_t i = 0; i < 4; i++) {
+        if (!tmc_recv_byte(ax, &echo_buf[i])) { echo_fail = (int8_t)i; break; }
+    }
+    if (echo_fail < 0) {
+        for (uint8_t i = 0; i < 8; i++) {
+            if (!tmc_recv_byte(ax, &resp_buf[i])) { resp_fail = (int8_t)i; break; }
+        }
+    }
+    SREG = sreg;
+
+    // --- Parse result -------------------------------------------------------
+    uint8_t ver = 0;
+    bool crc_ok = false;
+    bool ok = false;
+    if (echo_fail < 0 && resp_fail < 0) {
+        uint8_t exp_crc = tmc_crc8(resp_buf, 7);
+        crc_ok = (resp_buf[7] == exp_crc)
+               && (resp_buf[0] == 0x05)
+               && (resp_buf[1] == 0xFF);
+        if (crc_ok) {
+            uint32_t ioin = ((uint32_t)resp_buf[3] << 24)
+                          | ((uint32_t)resp_buf[4] << 16)
+                          | ((uint32_t)resp_buf[5] <<  8)
+                          |  (uint32_t)resp_buf[6];
+            ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
+            ok  = (ver == TMC2209_VERSION);
+        }
     }
 
+    // --- Diagnostic message -------------------------------------------------
+    // Examples:
+    //   [MSG:TMC2209 X lb=ok echo=05000600 resp=05FF0600000021B8 crc=ok ver=21 OK]
+    //   [MSG:TMC2209 X lb=FAIL echo=to@0]
+    //   [MSG:TMC2209 X lb=ok echo=05000600 resp=to@3]
+    //   [MSG:TMC2209 X lb=ok echo=05000600 resp=XXXXXXXXXXXXXXXX crc=err ver=00 FAIL]
+    #define TW(c) serial_write(c)
+    TW('['); TW('M'); TW('S'); TW('G'); TW(':');
+    TW('T'); TW('M'); TW('C'); TW('2'); TW('2'); TW('0'); TW('9'); TW(' ');
+    TW(axis == 0 ? 'X' : 'Y'); TW(' ');
+    // Loopback result
+    TW('l'); TW('b'); TW('=');
+    if (loopback_ok) { TW('o'); TW('k'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
+    TW(' ');
+    // Echo bytes
+    TW('e'); TW('c'); TW('h'); TW('o'); TW('=');
+    if (echo_fail >= 0) {
+        TW('t'); TW('o'); TW('@'); TW('0' + (uint8_t)echo_fail);
+    } else {
+        for (uint8_t i = 0; i < 4; i++) { tmc_write_hex8(echo_buf[i]); }
+        // Response bytes
+        TW(' '); TW('r'); TW('e'); TW('s'); TW('p'); TW('=');
+        if (resp_fail >= 0) {
+            TW('t'); TW('o'); TW('@'); TW('0' + (uint8_t)resp_fail);
+        } else {
+            for (uint8_t i = 0; i < 8; i++) { tmc_write_hex8(resp_buf[i]); }
+            TW(' '); TW('c'); TW('r'); TW('c'); TW('=');
+            if (crc_ok) { TW('o'); TW('k'); } else { TW('e'); TW('r'); TW('r'); }
+            TW(' '); TW('v'); TW('e'); TW('r'); TW('=');
+            tmc_write_hex8(ver);
+        }
+    }
+    TW(' ');
+    if (ok) { TW('O'); TW('K'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
+    TW(']'); TW('\r'); TW('\n');
+    #undef TW
+
     tmc_init_ok[axis] = ok;
-    tmc_report(axis, ok);
     return ok;
 }
 

@@ -5,7 +5,7 @@
   Controls RGB LEDs for microscope illumination using hardware PWM:
     Red:   D5  (PE3, Timer 3 OC3A) - Servo 3 header
     Green: D6  (PH3, Timer 4 OC4A) - Servo 2 header
-    Blue:  D45 (PL4, Timer 5 OC5B) - AUX-2 header
+    Blue:  D44 (PL5, Timer 5 OC5C) - AUX-2 header
 
   Usage: M150 R<0-255> U<0-255> B<0-255>
     R = Red brightness (0-255)

@@ -5,7 +5,7 @@
   Controls RGB LEDs for microscope illumination using hardware PWM:
     Red:   D5  (PE3, Timer 3 OC3A) - Servo 3 header
     Green: D6  (PH3, Timer 4 OC4A) - Servo 2 header
-    Blue:  D45 (PL4, Timer 5 OC5B) - AUX-2 header
+    Blue:  D44 (PL5, Timer 5 OC5C) - AUX-2 header
 
   Timer 3 is configured here for LED Red PWM (was previously used for sleep counter,
   which has been moved to Timer 2).
@@ -42,12 +42,12 @@ void led_init()
   // We just need to set OCR4A to 0 initially. OC4A output is enabled when LED is turned on.
   OCR4A = 0;
 
-  // Timer 5: Blue LED on OC5B (D45)
+  // Timer 5: Blue LED on OC5C (D44)
   // Fast PWM mode 14 (WGM5:0 = 1110), TOP = ICR5, 1/8 prescaler
   TCCR5A = (1<<WGM51);
   TCCR5B = (1<<WGM53) | (1<<WGM52) | (1<<CS51);
   ICR5 = 0x0400;  // TOP = 1024, ~1.9kHz PWM
-  OCR5B = 0;
+  OCR5C = 0;
 
   // Start with all LEDs off (OC outputs disconnected)
   led_stop();
@@ -78,12 +78,12 @@ void led_set_color(uint8_t red, uint8_t green, uint8_t blue)
     TCCR4A &= ~(1<<COM4A1);  // Disconnect OC4A (pin goes low)
   }
 
-  // Blue channel: Timer 5, OC5B (D45)
-  OCR5B = b_pwm;
+  // Blue channel: Timer 5, OC5C (D44)
+  OCR5C = b_pwm;
   if (b_pwm > 0) {
-    TCCR5A |= (1<<COM5B1);   // Non-inverting PWM on OC5B
+    TCCR5A |= (1<<COM5C1);   // Non-inverting PWM on OC5C
   } else {
-    TCCR5A &= ~(1<<COM5B1);  // Disconnect OC5B (pin goes low)
+    TCCR5A &= ~(1<<COM5C1);  // Disconnect OC5C (pin goes low)
   }
 }
 
@@ -93,10 +93,10 @@ void led_stop()
   // Disconnect all OC outputs and set PWM values to 0
   TCCR3A &= ~(1<<COM3A1);  // Disconnect OC3A
   TCCR4A &= ~(1<<COM4A1);  // Disconnect OC4A (leave OC4C for spindle)
-  TCCR5A &= ~(1<<COM5B1);  // Disconnect OC5B
+  TCCR5A &= ~(1<<COM5C1);  // Disconnect OC5C
   OCR3A = 0;
   OCR4A = 0;
-  OCR5B = 0;
+  OCR5C = 0;
 }
 
 

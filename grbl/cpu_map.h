@@ -449,10 +449,10 @@
   #define LED_GREEN_DDR     DDRH
   #define LED_GREEN_PORT    PORTH
   #define LED_GREEN_BIT     3     // MEGA2560 Digital Pin 6
-  // Blue: D45 (PL4, Timer 5 OC5B) - AUX-2 header
+  // Blue: D44 (PL5, Timer 5 OC5C) - AUX-2 header
   #define LED_BLUE_DDR      DDRL
   #define LED_BLUE_PORT     PORTL
-  #define LED_BLUE_BIT      4     // MEGA2560 Digital Pin 45
+  #define LED_BLUE_BIT      5     // MEGA2560 Digital Pin 44
 
 #endif
 

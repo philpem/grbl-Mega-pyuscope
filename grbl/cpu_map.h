@@ -440,19 +440,22 @@
   // D5 is reused for LED Red channel (Timer 3 OC3A).
   // The halogen lamp only needs PWM on D8 (heated bed MOSFET).
 
-  // --- RGB LED pin definitions (active under LED_CONTROL_ENABLE) ---
+  // --- RGB LED pin definitions ---
   // Red: D5 (PE3, Timer 3 OC3A) - Servo 3 header
   #define LED_RED_DDR       DDRE
   #define LED_RED_PORT      PORTE
   #define LED_RED_BIT       3     // MEGA2560 Digital Pin 5
+  #define LED_RED_INVERT          // PWM is reverse-acting (active-low LED driver)
   // Green: D6 (PH3, Timer 4 OC4A) - Servo 2 header
   #define LED_GREEN_DDR     DDRH
   #define LED_GREEN_PORT    PORTH
   #define LED_GREEN_BIT     3     // MEGA2560 Digital Pin 6
+  #define LED_GREEN_INVERT        // PWM is reverse-acting (active-low LED driver)
   // Blue: D44 (PL5, Timer 5 OC5C) - AUX-2 header
   #define LED_BLUE_DDR      DDRL
   #define LED_BLUE_PORT     PORTL
   #define LED_BLUE_BIT      5     // MEGA2560 Digital Pin 44
+  #define LED_BLUE_INVERT         // PWM is reverse-acting (active-low LED driver)
 
 #endif
 

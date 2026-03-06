@@ -49,7 +49,18 @@ void led_init()
   ICR5 = 0x0400;  // TOP = 1024, ~1.9kHz PWM
   OCR5C = 0;
 
-  // Start with all LEDs off (OC outputs disconnected)
+  // Start with all LEDs off.
+  // For inverted channels, connect OC outputs now (they stay connected permanently)
+  // so the pin is driven HIGH (LED off) rather than floating low.
+  #ifdef LED_RED_INVERT
+    TCCR3A |= (1<<COM3A1);
+  #endif
+  #ifdef LED_GREEN_INVERT
+    TCCR4A |= (1<<COM4A1);
+  #endif
+  #ifdef LED_BLUE_INVERT
+    TCCR5A |= (1<<COM5C1);
+  #endif
   led_stop();
 }
 
@@ -61,42 +72,79 @@ void led_set_color(uint8_t red, uint8_t green, uint8_t blue)
   uint16_t g_pwm = (uint16_t)green * 4;
   uint16_t b_pwm = (uint16_t)blue * 4;
 
+  // For inverted (reverse-acting) channels, invert the PWM value.
+  // OCR=TOP gives constant HIGH output (LED off for active-low driver).
+  // OCR near 0 gives mostly-LOW output (LED on for active-low driver).
+  // OC output stays connected at all times so the pin doesn't float low.
+
   // Red channel: Timer 3, OC3A (D5)
-  OCR3A = r_pwm;
-  if (r_pwm > 0) {
-    TCCR3A |= (1<<COM3A1);   // Non-inverting PWM on OC3A
-  } else {
-    TCCR3A &= ~(1<<COM3A1);  // Disconnect OC3A (pin goes low)
-  }
+  #ifdef LED_RED_INVERT
+    OCR3A = 0x0400 - r_pwm;
+    TCCR3A |= (1<<COM3A1);   // Always connected for inverted output
+  #else
+    OCR3A = r_pwm;
+    if (r_pwm > 0) {
+      TCCR3A |= (1<<COM3A1);
+    } else {
+      TCCR3A &= ~(1<<COM3A1);  // Disconnect OC3A (pin goes low)
+    }
+  #endif
 
   // Green channel: Timer 4, OC4A (D6)
   // Note: Timer 4 shared with spindle (OCR4C/D8). Only touch OC4A bits.
-  OCR4A = g_pwm;
-  if (g_pwm > 0) {
-    TCCR4A |= (1<<COM4A1);   // Non-inverting PWM on OC4A
-  } else {
-    TCCR4A &= ~(1<<COM4A1);  // Disconnect OC4A (pin goes low)
-  }
+  #ifdef LED_GREEN_INVERT
+    OCR4A = 0x0400 - g_pwm;
+    TCCR4A |= (1<<COM4A1);
+  #else
+    OCR4A = g_pwm;
+    if (g_pwm > 0) {
+      TCCR4A |= (1<<COM4A1);
+    } else {
+      TCCR4A &= ~(1<<COM4A1);
+    }
+  #endif
 
   // Blue channel: Timer 5, OC5C (D44)
-  OCR5C = b_pwm;
-  if (b_pwm > 0) {
-    TCCR5A |= (1<<COM5C1);   // Non-inverting PWM on OC5C
-  } else {
-    TCCR5A &= ~(1<<COM5C1);  // Disconnect OC5C (pin goes low)
-  }
+  #ifdef LED_BLUE_INVERT
+    OCR5C = 0x0400 - b_pwm;
+    TCCR5A |= (1<<COM5C1);
+  #else
+    OCR5C = b_pwm;
+    if (b_pwm > 0) {
+      TCCR5A |= (1<<COM5C1);
+    } else {
+      TCCR5A &= ~(1<<COM5C1);
+    }
+  #endif
 }
 
 
 void led_stop()
 {
-  // Disconnect all OC outputs and set PWM values to 0
-  TCCR3A &= ~(1<<COM3A1);  // Disconnect OC3A
-  TCCR4A &= ~(1<<COM4A1);  // Disconnect OC4A (leave OC4C for spindle)
-  TCCR5A &= ~(1<<COM5C1);  // Disconnect OC5C
-  OCR3A = 0;
-  OCR4A = 0;
-  OCR5C = 0;
+  // Turn all LEDs off.
+  // For inverted channels: set OCR=TOP so pin stays HIGH (LED off), keep OC connected.
+  // For non-inverted channels: disconnect OC so pin goes LOW (LED off).
+
+  #ifdef LED_RED_INVERT
+    OCR3A = 0x0400;
+  #else
+    TCCR3A &= ~(1<<COM3A1);
+    OCR3A = 0;
+  #endif
+
+  #ifdef LED_GREEN_INVERT
+    OCR4A = 0x0400;
+  #else
+    TCCR4A &= ~(1<<COM4A1);  // Leave OC4C for spindle
+    OCR4A = 0;
+  #endif
+
+  #ifdef LED_BLUE_INVERT
+    OCR5C = 0x0400;
+  #else
+    TCCR5A &= ~(1<<COM5C1);
+    OCR5C = 0;
+  #endif
 }
 
 

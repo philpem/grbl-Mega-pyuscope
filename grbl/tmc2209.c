@@ -38,26 +38,32 @@
 // Each iteration is ~5 µs (conservative); 15 ms / 5 µs = 3000 iterations.
 #define TMC_RX_TIMEOUT_LOOPS  3000
 
-// In single-wire UART mode the TMC2209 echoes every byte it receives back on
-// the same wire before sending a read reply.  We must account for these echo
-// bytes in both writes and reads:
+// In our 2-wire topology (MCU TX on D40, MCU RX on A9, joined via 1 kΩ to
+// IC PDN_UART), the IC echoes every received byte back on PDN_UART starting
+// ~4 bit-periods after each stop bit.  Echo bytes 0–2 overlap with our TX;
+// echo byte 3 of a write (or read-request) extends past the end of TX.
 //
-//   Write (8 bytes TX) → IC echoes 8 bytes.  Echo starts after a 4-bit
-//   inter-frame gap and lasts (8 × 10) bit-periods.
+// For WRITES (8 bytes TX):
+//   The IC echoes all 8 bytes.  Echo byte 7 finishes ~728 µs after TX ends.
+//   We add a post-TX delay (outside cli) so the echo clears before the next
+//   register access.  Without this delay an overlapping write or read could
+//   be corrupted because the IC's open-drain echo can pull PDN_UART LOW while
+//   D40 (through 1 kΩ) tries to drive it HIGH.
 //
-//   Read request (4 bytes TX) → IC echoes 4 bytes, then sends 8-byte reply.
-//
-// For writes we add a post-TX delay (outside cli) so the echo clears before
-// the next register access.  Overlapping writes corrupt each other because
-// when the master's TX output is HIGH (idle) but the IC is echoing a 0 bit,
-// the 1 kΩ coupling lets the IC pull the shared line LOW, corrupting the next
-// byte.
-//
-// For reads we actively receive and discard the 4 echo bytes (inside cli)
-// then receive the real 8-byte reply.
-#define TMC_ECHO_GUARD_BITS   4                               // inter-frame gap before echo
-#define TMC_WRITE_ECHO_US     (TMC_BIT_US * (TMC_ECHO_GUARD_BITS + 8*10.0))  // 8-byte write echo
-#define TMC_READ_ECHO_US      (TMC_BIT_US * (TMC_ECHO_GUARD_BITS + 4*10.0))  // 4-byte read-req echo
+// For READS (4 bytes TX + 8 bytes response):
+//   Echo bytes 0–2 overlap our TX; echo byte 3 ends ~728 µs after TX.
+//   The IC starts sending its 8-byte response after the echo clears plus a
+//   ~4-bit inter-frame gap (~208 µs).  We wait for the full turnaround
+//   (echo + gap ≈ 20 bit-periods) and then receive the response directly.
+//   We do NOT try to read the echo bytes: because they overlap with TX we
+//   cannot reliably sample them.
+#define TMC_ECHO_GUARD_BITS      4
+#define TMC_WRITE_ECHO_US        (TMC_BIT_US * (TMC_ECHO_GUARD_BITS + 8*10.0))
+// Time from end of TX to start of IC response (echo byte 3 duration + gap):
+//   echo byte 3: 4 guard bits + 10 data/stop bits = 14 bit-periods after TX end
+//   IC response gap: 4 bit-periods
+//   Extra margin: 2 bit-periods
+#define TMC_READ_TURNAROUND_US   (TMC_BIT_US * 20.0)
 
 // ---------------------------------------------------------------------------
 // Per-axis initialisation result (set by tmc2209_init, read by tmc2209_axis_ok)
@@ -218,9 +224,11 @@ bool tmc2209_read_reg(uint8_t axis, uint8_t reg, uint32_t *val)
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
-    // The IC echoes our 4-byte request before sending its 8-byte reply.
-    // Receive and discard those echo bytes so we are aligned on the real response.
-    { uint8_t dummy; for (uint8_t i = 0; i < 4; i++) { tmc_recv_byte(ax, &dummy); } }
+    // Wait for the IC's echo of the request to finish and for the IC to
+    // prepare and start sending its response.  In our 2-wire topology the
+    // echo bytes overlap with our TX and are not cleanly receivable; we
+    // simply wait for the turnaround time then read the response directly.
+    _delay_us(TMC_READ_TURNAROUND_US);
     // Receive 8-byte response
     uint8_t resp[8];
     for (uint8_t i = 0; i < 8; i++) {
@@ -294,21 +302,16 @@ bool tmc2209_init(uint8_t axis)
     req[2] = TMC_REG_IOIN & 0x7F;
     req[3] = tmc_crc8(req, 3);
 
-    uint8_t echo_buf[4] = {0, 0, 0, 0};
     uint8_t resp_buf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    int8_t  echo_fail = -1;   // index of first timed-out echo byte, or -1 = all OK
     int8_t  resp_fail = -1;   // index of first timed-out response byte, or -1 = all OK
 
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
-    for (uint8_t i = 0; i < 4; i++) {
-        if (!tmc_recv_byte(ax, &echo_buf[i])) { echo_fail = (int8_t)i; break; }
-    }
-    if (echo_fail < 0) {
-        for (uint8_t i = 0; i < 8; i++) {
-            if (!tmc_recv_byte(ax, &resp_buf[i])) { resp_fail = (int8_t)i; break; }
-        }
+    // Wait for the IC's request echo to finish + IC turnaround before response.
+    _delay_us(TMC_READ_TURNAROUND_US);
+    for (uint8_t i = 0; i < 8; i++) {
+        if (!tmc_recv_byte(ax, &resp_buf[i])) { resp_fail = (int8_t)i; break; }
     }
     SREG = sreg;
 
@@ -316,7 +319,7 @@ bool tmc2209_init(uint8_t axis)
     uint8_t ver = 0;
     bool crc_ok = false;
     bool ok = false;
-    if (echo_fail < 0 && resp_fail < 0) {
+    if (resp_fail < 0) {
         uint8_t exp_crc = tmc_crc8(resp_buf, 7);
         crc_ok = (resp_buf[7] == exp_crc)
                && (resp_buf[0] == 0x05)
@@ -333,40 +336,37 @@ bool tmc2209_init(uint8_t axis)
 
     // --- Diagnostic message -------------------------------------------------
     // Examples:
-    //   [MSG:TMC2209 X lb=ok echo=05000600 resp=05FF0600000021B8 crc=ok ver=21 OK]
-    //   [MSG:TMC2209 X lb=FAIL echo=to@0]
-    //   [MSG:TMC2209 X lb=ok echo=05000600 resp=to@3]
-    //   [MSG:TMC2209 X lb=ok echo=05000600 resp=XXXXXXXXXXXXXXXX crc=err ver=00 FAIL]
-    #define TW(c) serial_write(c)
-    TW('['); TW('M'); TW('S'); TW('G'); TW(':');
-    TW('T'); TW('M'); TW('C'); TW('2'); TW('2'); TW('0'); TW('9'); TW(' ');
-    TW(axis == 0 ? 'X' : 'Y'); TW(' ');
-    // Loopback result
-    TW('l'); TW('b'); TW('=');
-    if (loopback_ok) { TW('o'); TW('k'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
-    TW(' ');
-    // Echo bytes
-    TW('e'); TW('c'); TW('h'); TW('o'); TW('=');
-    if (echo_fail >= 0) {
-        TW('t'); TW('o'); TW('@'); TW('0' + (uint8_t)echo_fail);
-    } else {
-        for (uint8_t i = 0; i < 4; i++) { tmc_write_hex8(echo_buf[i]); }
-        // Response bytes
-        TW(' '); TW('r'); TW('e'); TW('s'); TW('p'); TW('=');
-        if (resp_fail >= 0) {
-            TW('t'); TW('o'); TW('@'); TW('0' + (uint8_t)resp_fail);
-        } else {
-            for (uint8_t i = 0; i < 8; i++) { tmc_write_hex8(resp_buf[i]); }
-            TW(' '); TW('c'); TW('r'); TW('c'); TW('=');
-            if (crc_ok) { TW('o'); TW('k'); } else { TW('e'); TW('r'); TW('r'); }
-            TW(' '); TW('v'); TW('e'); TW('r'); TW('=');
-            tmc_write_hex8(ver);
+    //   [MSG:TMC2209 X lb=ok resp=05FF0600000021B8 crc=ok ver=21 OK]
+    //   [MSG:TMC2209 X lb=FAIL]
+    //   [MSG:TMC2209 X lb=ok resp=to@0 FAIL]
+    //   [MSG:TMC2209 X lb=ok resp=XXXXXXXXXXXXXXXX crc=err ver=00 FAIL]
+    {
+        #define TW(c) serial_write(c)
+        TW('['); TW('M'); TW('S'); TW('G'); TW(':');
+        TW('T'); TW('M'); TW('C'); TW('2'); TW('2'); TW('0'); TW('9'); TW(' ');
+        TW(axis == 0 ? 'X' : 'Y'); TW(' ');
+        // Loopback result
+        TW('l'); TW('b'); TW('=');
+        if (loopback_ok) { TW('o'); TW('k'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
+        if (loopback_ok) {
+            TW(' ');
+            // Response bytes
+            TW('r'); TW('e'); TW('s'); TW('p'); TW('=');
+            if (resp_fail >= 0) {
+                TW('t'); TW('o'); TW('@'); TW('0' + (uint8_t)resp_fail);
+            } else {
+                for (uint8_t i = 0; i < 8; i++) { tmc_write_hex8(resp_buf[i]); }
+                TW(' '); TW('c'); TW('r'); TW('c'); TW('=');
+                if (crc_ok) { TW('o'); TW('k'); } else { TW('e'); TW('r'); TW('r'); }
+                TW(' '); TW('v'); TW('e'); TW('r'); TW('=');
+                tmc_write_hex8(ver);
+            }
+            TW(' ');
+            if (ok) { TW('O'); TW('K'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
         }
+        TW(']'); TW('\r'); TW('\n');
+        #undef TW
     }
-    TW(' ');
-    if (ok) { TW('O'); TW('K'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
-    TW(']'); TW('\r'); TW('\n');
-    #undef TW
 
     tmc_init_ok[axis] = ok;
     return ok;

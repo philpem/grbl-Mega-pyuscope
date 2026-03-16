@@ -25,6 +25,14 @@
 
 #ifdef TMC2209_SENSORLESS_HOMING
 
+// avr-gcc 7.x LTO silently eliminates __builtin_avr_delay_cycles() when the
+// constant is propagated at link time rather than compile time, making all
+// _delay_us() / _delay_ms() calls no-ops.  This pragma disables LTO for this
+// translation unit so delays are always emitted correctly.  Works for both
+// Makefile builds (which also set -fno-lto per-file) and Arduino IDE builds
+// (which have no per-file flag override).
+#pragma GCC optimize ("no-lto")
+
 #include <util/delay.h>
 #include <avr/interrupt.h>
 

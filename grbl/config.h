@@ -657,8 +657,10 @@
   #define TMC2209_SENSORLESS_HOMING         // Master enable; comment out to disable
 
   #define TMC2209_BAUD_RATE        19200    // Software UART baud rate (chip auto-detects)
-  #define TMC2209_X_ADDR           0        // X driver UART address (set by MS1/MS2)
-  #define TMC2209_Y_ADDR           0        // Y driver UART address (set by MS1/MS2)
+  // TMC2209_X_ADDR / TMC2209_Y_ADDR: if defined, the address is used directly
+  // (no scan).  Leave undefined to auto-detect from MS1/MS2 pin state at startup.
+  // #define TMC2209_X_ADDR        0        // 0-3: fixed X driver UART address
+  // #define TMC2209_Y_ADDR        0        // 0-3: fixed Y driver UART address
 
   // Motor current: 0-31 scale (31 = 100% of driver's Vref-set current)
   // Microscope stages typically use small motors; start conservative and tune up.

@@ -89,10 +89,16 @@
 // Per-axis initialisation result (set by tmc2209_init, read by tmc2209_axis_ok)
 // ---------------------------------------------------------------------------
 static bool    tmc_init_ok[2] = {false, false};
-// Runtime-discovered UART address (0–3, set by MS1/MS2 pins on driver board).
-// Initialised to the compile-time defaults; overwritten by address scan in
-// tmc2209_init() if the hardware address differs.
-static uint8_t tmc_addr[2]    = { TMC2209_X_ADDR, TMC2209_Y_ADDR };
+// Runtime UART addresses (0–3, set by MS1/MS2 hardware pins on the driver).
+// If TMC2209_X/Y_ADDR are defined in config.h the fixed values are used and
+// the address scan is skipped.  Otherwise auto-detection runs at startup.
+#if !defined(TMC2209_X_ADDR)
+# define TMC2209_X_ADDR  0xFF   // sentinel: scan required
+#endif
+#if !defined(TMC2209_Y_ADDR)
+# define TMC2209_Y_ADDR  0xFF   // sentinel: scan required
+#endif
+static uint8_t tmc_addr[2] = { TMC2209_X_ADDR, TMC2209_Y_ADDR };
 
 // ---------------------------------------------------------------------------
 // Axis-indexed pin accessors
@@ -387,20 +393,26 @@ bool tmc2209_init(uint8_t axis)
     sei();
     TMC_L2(TMC_CYCLES_1MS);               // let IC recover from break
 
-    // --- Address scan -------------------------------------------------------
-    // The TMC2209 UART node address is set by MS1/MS2 hardware pins (0–3).
-    // With standard 1/16-step jumpers MS1=MS2=HIGH → addr=3.
-    // We scan all four addresses and use the first that returns a valid IOIN
-    // response (correct CRC and TMC2209 version byte).  This makes the
-    // firmware work regardless of microstepping jumper configuration.
+    // --- Address scan / fixed address --------------------------------------
+    // If TMC2209_X/Y_ADDR was defined in config.h the address is fixed and
+    // we verify it with a single IOIN read.  Otherwise we scan 0–3 and use
+    // the first that returns a valid response (correct CRC + version).
     uint8_t rx_buf[12];
     uint8_t rx_n    = 0;
     uint8_t found   = 0xFF;  // 0xFF = not found
 
-    for (uint8_t a = 0; a < 4; a++) {
-        if (tmc_try_addr(ax, a, rx_buf, &rx_n)) {
-            found = a;
-            break;
+    if (tmc_addr[axis] <= 3) {
+        // Fixed address: just verify it responds correctly
+        if (tmc_try_addr(ax, tmc_addr[axis], rx_buf, &rx_n)) {
+            found = tmc_addr[axis];
+        }
+    } else {
+        // Auto-scan 0–3
+        for (uint8_t a = 0; a < 4; a++) {
+            if (tmc_try_addr(ax, a, rx_buf, &rx_n)) {
+                found = a;
+                break;
+            }
         }
     }
 

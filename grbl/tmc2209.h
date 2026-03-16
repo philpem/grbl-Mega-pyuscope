@@ -14,7 +14,9 @@
     Y DIAG wired to Y MIN limit input (D14)
 
   UART address (0-3) is set by MS1/MS2 jumpers on the driver carrier board.
-  Default is 0 for both axes (TMC2209_X_ADDR / TMC2209_Y_ADDR in config.h).
+  If TMC2209_X_ADDR / TMC2209_Y_ADDR are defined in config.h the address is
+  used directly.  If left undefined, the address is auto-detected at startup
+  by scanning all four addresses and using the first that responds.
 */
 
 #ifndef tmc2209_h

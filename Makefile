@@ -58,6 +58,12 @@ all:	grbl.hex
 $(BUILDDIR)/%.o: $(SOURCEDIR)/%.c
 	$(COMPILE) -MMD -MP -c $< -o $@
 
+# tmc2209.c uses _delay_us()/_delay_ms() for bit-bang UART timing.
+# avr-gcc 7.x LTO silently eliminates __builtin_avr_delay_cycles(), making
+# all delays zero-length and breaking the UART completely.  Compile without LTO.
+$(BUILDDIR)/tmc2209.o: $(SOURCEDIR)/tmc2209.c
+	$(COMPILE) -fno-lto -MMD -MP -c $< -o $@
+
 .S.o:
 	$(COMPILE) -x assembler-with-cpp -c $< -o $(BUILDDIR)/$@ 
 # "-x assembler-with-cpp" should not be necessary since this is the default

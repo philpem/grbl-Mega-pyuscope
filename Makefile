@@ -58,9 +58,10 @@ all:	grbl.hex
 $(BUILDDIR)/%.o: $(SOURCEDIR)/%.c
 	$(COMPILE) -MMD -MP -c $< -o $@
 
-# tmc2209.c uses _delay_us()/_delay_ms() for bit-bang UART timing.
-# avr-gcc 7.x LTO silently eliminates __builtin_avr_delay_cycles(), making
-# all delays zero-length and breaking the UART completely.  Compile without LTO.
+# tmc2209.c uses __builtin_avr_delay_cycles() directly (not _delay_us) to
+# avoid the avr-gcc 7.x LTO bug where floating-point constant folding is
+# deferred to link time and produces zero-length delays.  The -fno-lto flag
+# here is a belt-and-suspenders measure for older toolchains.
 $(BUILDDIR)/tmc2209.o: $(SOURCEDIR)/tmc2209.c
 	$(COMPILE) -fno-lto -MMD -MP -c $< -o $@
 

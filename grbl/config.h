@@ -42,8 +42,13 @@
 //#define CPU_MAP_2560_RAMPS_BOARD
 
 // To use with RAMPS 1.4 Board to control a microscope with Pyuscope, comment out the above defines and uncomment the next two defines
-#define DEFAULTS_RAMPS_BOARD
+#define DEFAULTS_RAMPS_BOARD_PYUSCOPE
 #define CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
+// The pyuscope board is a RAMPS variant; define the family marker so that
+// RAMPS-common code in limits.c, stepper.c, settings.c etc. is included.
+#ifdef DEFAULTS_RAMPS_BOARD_PYUSCOPE
+# define DEFAULTS_RAMPS_BOARD
+#endif
 
 // Serial baud rate
 // #define BAUD_RATE 230400
@@ -113,7 +118,7 @@
 #ifdef DEFAULTS_RAMPS_BOARD
   #define HOMING_CYCLE_0 (1<<X_AXIS)   // Home X axis
   #define HOMING_CYCLE_1 (1<<Y_AXIS)   // Home Y axis
-  #define HOMING_CYCLE_2 (1<<Z_AXIS)   // OPTIONAL: Home Z axis 
+  #define HOMING_CYCLE_2 (1<<Z_AXIS)   // OPTIONAL: Home Z axis
 #else
   #define HOMING_CYCLE_0 (1<<Z_AXIS)                // REQUIRED: First move Z to clear workspace.
   #define HOMING_CYCLE_1 ((1<<X_AXIS)|(1<<Y_AXIS))  // OPTIONAL: Then move X,Y at the same time.
@@ -211,7 +216,7 @@
   // Only enable the following line if you have - (min) limit switches attached
   //#define INVERT_MIN_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
   // Only enable the following line if you have + (max) limit switches attached
-  //#define INVERT_MAX_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))  
+  //#define INVERT_MAX_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
 #endif
 
 // Inverts the spindle enable pin from low-disabled/high-enabled to low-enabled/high-disabled. Useful

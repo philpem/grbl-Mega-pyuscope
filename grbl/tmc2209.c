@@ -253,9 +253,19 @@ bool tmc2209_read_reg(uint8_t axis, uint8_t reg, uint32_t *val)
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
+    // Tri-state TX for the receive window.
+    // With TX as push-pull HIGH the MCU sources ≈5mA through the 1kΩ coupling
+    // resistor into PDN_UART.  The TMC2209's open-drain echo driver sinks at
+    // most 4mA (VOL=0.5V spec), so it cannot pull PDN_UART below the MCU's
+    // VIL threshold (0.2×VCC ≈ 1.0V).  Switching TX to input+pull-up reduces
+    // the source to ≈0.1mA, allowing the IC echo to pull cleanly to ground.
+    *ax->tx_ddr  &= ~(1 << ax->tx_bit);  // TX → input (stop sourcing via 1kΩ)
+    *ax->tx_port |=  (1 << ax->tx_bit);  // TX → internal pull-up (~50kΩ, weak)
     for (n = 0; n < 12; n++) {
         if (!tmc_recv_byte(ax, &buf[n])) { break; }
     }
+    *ax->tx_ddr  |= (1 << ax->tx_bit);   // TX → output
+    *ax->tx_port |= (1 << ax->tx_bit);   // TX → idle HIGH
     SREG = sreg;
 
     // Scan received data for a valid 8-byte response frame
@@ -349,9 +359,15 @@ bool tmc2209_init(uint8_t axis)
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
+    // Tri-state TX so the IC's open-drain echo can pull PDN_UART/A9 LOW.
+    // See tmc2209_read_reg() for a full explanation.
+    *ax->tx_ddr  &= ~(1 << ax->tx_bit);
+    *ax->tx_port |=  (1 << ax->tx_bit);
     for (rx_n = 0; rx_n < 12; rx_n++) {
         if (!tmc_recv_byte(ax, &rx_buf[rx_n])) { break; }
     }
+    *ax->tx_ddr  |= (1 << ax->tx_bit);
+    *ax->tx_port |= (1 << ax->tx_bit);
     SREG = sreg;
 
     // --- Scan for valid response frame --------------------------------------

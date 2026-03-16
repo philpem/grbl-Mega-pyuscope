@@ -88,7 +88,11 @@
 // ---------------------------------------------------------------------------
 // Per-axis initialisation result (set by tmc2209_init, read by tmc2209_axis_ok)
 // ---------------------------------------------------------------------------
-static bool tmc_init_ok[2] = {false, false};
+static bool    tmc_init_ok[2] = {false, false};
+// Runtime-discovered UART address (0–3, set by MS1/MS2 pins on driver board).
+// Initialised to the compile-time defaults; overwritten by address scan in
+// tmc2209_init() if the hardware address differs.
+static uint8_t tmc_addr[2]    = { TMC2209_X_ADDR, TMC2209_Y_ADDR };
 
 // ---------------------------------------------------------------------------
 // Axis-indexed pin accessors
@@ -101,7 +105,6 @@ typedef struct {
     volatile uint8_t *rx_port;  // write to enable pull-up
     volatile uint8_t *rx_pin;   // read for input state
     uint8_t           rx_bit;
-    uint8_t           addr;
 } tmc_axis_t;
 
 static const tmc_axis_t tmc_axes[2] = {
@@ -113,7 +116,6 @@ static const tmc_axis_t tmc_axes[2] = {
         .rx_port = &TMC_X_RX_PORT,
         .rx_pin  = &TMC_X_RX_PIN,
         .rx_bit  = TMC_X_RX_BIT,
-        .addr    = TMC2209_X_ADDR,
     },
     {   // Y axis
         .tx_ddr  = &TMC_Y_TX_DDR,
@@ -123,7 +125,6 @@ static const tmc_axis_t tmc_axes[2] = {
         .rx_port = &TMC_Y_RX_PORT,
         .rx_pin  = &TMC_Y_RX_PIN,
         .rx_bit  = TMC_Y_RX_BIT,
-        .addr    = TMC2209_Y_ADDR,
     },
 };
 
@@ -198,6 +199,54 @@ static bool tmc_recv_byte(const tmc_axis_t *ax, uint8_t *out)
 }
 
 // ---------------------------------------------------------------------------
+// Send an IOIN read request at address `addr` and return true if the response
+// is a valid TMC2209 datagram (correct CRC, version == TMC2209_VERSION).
+// On success, copies up to 12 received bytes into rx_buf and sets *rx_n_out.
+// Tri-states TX during receive (required for 2-wire topology — see write_reg).
+// Interrupts are re-enabled between calls so the stepper ISR keeps running.
+// ---------------------------------------------------------------------------
+static bool tmc_try_addr(const tmc_axis_t *ax, uint8_t addr,
+                         uint8_t *rx_buf, uint8_t *rx_n_out)
+{
+    uint8_t req[4];
+    req[0] = 0x05;
+    req[1] = addr;
+    req[2] = TMC_REG_IOIN & 0x7F;
+    req[3] = tmc_crc8(req, 3);
+
+    uint8_t buf[12];
+    uint8_t n = 0;
+
+    uint8_t sreg = SREG;
+    cli();
+    for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
+    *ax->tx_ddr  &= ~(1 << ax->tx_bit);   // TX → input (tri-state)
+    *ax->tx_port |=  (1 << ax->tx_bit);   // TX → internal pull-up
+    for (n = 0; n < 12; n++) {
+        if (!tmc_recv_byte(ax, &buf[n])) { break; }
+    }
+    *ax->tx_ddr  |= (1 << ax->tx_bit);    // TX → output
+    *ax->tx_port |= (1 << ax->tx_bit);    // TX → idle HIGH
+    SREG = sreg;
+
+    // Scan the received bytes for a valid 8-byte response frame
+    for (uint8_t s = 0; s + 8 <= n; s++) {
+        if (buf[s] != 0x05 || buf[s+1] != 0xFF)  { continue; }
+        if (buf[s+7] != tmc_crc8(&buf[s], 7))     { continue; }
+        uint32_t ioin = ((uint32_t)buf[s+3] << 24)
+                      | ((uint32_t)buf[s+4] << 16)
+                      | ((uint32_t)buf[s+5] <<  8)
+                      |  (uint32_t)buf[s+6];
+        uint8_t ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
+        if (ver != TMC2209_VERSION) { continue; }
+        if (rx_buf)    { for (uint8_t k = 0; k < n; k++) { rx_buf[k] = buf[k]; } }
+        if (rx_n_out)  { *rx_n_out = n; }
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // Write a 32-bit value to a TMC2209 register.
 // ---------------------------------------------------------------------------
 void tmc2209_write_reg(uint8_t axis, uint8_t reg, uint32_t val)
@@ -207,7 +256,7 @@ void tmc2209_write_reg(uint8_t axis, uint8_t reg, uint32_t val)
 
     uint8_t dgram[8];
     dgram[0] = 0x05;               // SYNC byte
-    dgram[1] = ax->addr;           // Node address
+    dgram[1] = tmc_addr[axis];     // Node address (discovered by address scan)
     dgram[2] = reg | 0x80;         // Register address with write flag
     dgram[3] = (uint8_t)(val >> 24);
     dgram[4] = (uint8_t)(val >> 16);
@@ -239,8 +288,8 @@ bool tmc2209_read_reg(uint8_t axis, uint8_t reg, uint32_t *val)
     // Send read request (4 bytes)
     uint8_t req[4];
     req[0] = 0x05;
-    req[1] = ax->addr;
-    req[2] = reg & 0x7F;  // Read bit = 0
+    req[1] = tmc_addr[axis];  // Node address (discovered by address scan)
+    req[2] = reg & 0x7F;      // Read bit = 0
     req[3] = tmc_crc8(req, 3);
 
     // After TX, the IC echoes the request back on PDN_UART.  In our 2-wire
@@ -338,59 +387,38 @@ bool tmc2209_init(uint8_t axis)
     sei();
     TMC_L2(TMC_CYCLES_1MS);               // let IC recover from break
 
-    // --- Configure driver via UART ------------------------------------------
-    tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
-    tmc2209_write_reg(axis, TMC_REG_IHOLD_IRUN,
-        TMC_IHOLD_IRUN_VAL(TMC2209_IHOLD, TMC2209_IRUN, 6));
-
-    // --- Read IOIN: capture response for diagnostics -------------------------
-    // Read up to 12 bytes (4 possible echo + 8 response) and scan for the
-    // valid response frame.  Shows all received bytes in the diagnostic so
-    // we can see exactly what the IC sends.
-    uint8_t req[4];
-    req[0] = 0x05;
-    req[1] = ax->addr;
-    req[2] = TMC_REG_IOIN & 0x7F;
-    req[3] = tmc_crc8(req, 3);
-
+    // --- Address scan -------------------------------------------------------
+    // The TMC2209 UART node address is set by MS1/MS2 hardware pins (0–3).
+    // With standard 1/16-step jumpers MS1=MS2=HIGH → addr=3.
+    // We scan all four addresses and use the first that returns a valid IOIN
+    // response (correct CRC and TMC2209 version byte).  This makes the
+    // firmware work regardless of microstepping jumper configuration.
     uint8_t rx_buf[12];
-    uint8_t rx_n = 0;  // number of bytes actually received
+    uint8_t rx_n    = 0;
+    uint8_t found   = 0xFF;  // 0xFF = not found
 
-    uint8_t sreg = SREG;
-    cli();
-    for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
-    // Tri-state TX so the IC's open-drain echo can pull PDN_UART/A9 LOW.
-    // See tmc2209_read_reg() for a full explanation.
-    *ax->tx_ddr  &= ~(1 << ax->tx_bit);
-    *ax->tx_port |=  (1 << ax->tx_bit);
-    for (rx_n = 0; rx_n < 12; rx_n++) {
-        if (!tmc_recv_byte(ax, &rx_buf[rx_n])) { break; }
+    for (uint8_t a = 0; a < 4; a++) {
+        if (tmc_try_addr(ax, a, rx_buf, &rx_n)) {
+            found = a;
+            break;
+        }
     }
-    *ax->tx_ddr  |= (1 << ax->tx_bit);
-    *ax->tx_port |= (1 << ax->tx_bit);
-    SREG = sreg;
 
-    // --- Scan for valid response frame --------------------------------------
-    uint8_t ver = 0;
-    bool ok = false;
-    for (uint8_t s = 0; s + 8 <= rx_n; s++) {
-        if (rx_buf[s] != 0x05 || rx_buf[s+1] != 0xFF) { continue; }
-        if (rx_buf[s+7] != tmc_crc8(&rx_buf[s], 7))   { continue; }
-        uint32_t ioin = ((uint32_t)rx_buf[s+3] << 24)
-                      | ((uint32_t)rx_buf[s+4] << 16)
-                      | ((uint32_t)rx_buf[s+5] <<  8)
-                      |  (uint32_t)rx_buf[s+6];
-        ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
-        ok  = (ver == TMC2209_VERSION);
-        break;
+    bool ok = (found != 0xFF);
+    if (ok) {
+        tmc_addr[axis] = found;
+        // Configure the driver with the discovered address
+        tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
+        tmc2209_write_reg(axis, TMC_REG_IHOLD_IRUN,
+            TMC_IHOLD_IRUN_VAL(TMC2209_IHOLD, TMC2209_IRUN, 6));
     }
 
     // --- Diagnostic message -------------------------------------------------
     // Examples:
-    //   [MSG:TMC2209 X lb=ok rx=9/05FF060021xxB8 ver=21 OK]
+    //   [MSG:TMC2209 X lb=ok addr=0 rx=08/05FF062100004CDF ver=21 OK]
+    //   [MSG:TMC2209 X lb=ok addr=3 rx=08/05FF062100004CDF ver=21 OK]
+    //   [MSG:TMC2209 X lb=ok addr=? FAIL]
     //   [MSG:TMC2209 X lb=FAIL]
-    //   [MSG:TMC2209 X lb=ok rx=00 FAIL]
-    //   [MSG:TMC2209 X lb=ok rx=08/XXXXXXXXXXXXXXXX FAIL]
     {
         #define TW(c) serial_write(c)
         TW('['); TW('M'); TW('S'); TW('G'); TW(':');
@@ -400,6 +428,8 @@ bool tmc2209_init(uint8_t axis)
         TW('l'); TW('b'); TW('=');
         if (loopback_ok) { TW('o'); TW('k'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
         if (loopback_ok) {
+            TW(' '); TW('a'); TW('d'); TW('d'); TW('r'); TW('=');
+            if (ok) { TW('0' + found); } else { TW('?'); }
             TW(' ');
             // Show byte count and all received bytes as hex
             TW('r'); TW('x'); TW('=');
@@ -409,6 +439,18 @@ bool tmc2209_init(uint8_t axis)
                 for (uint8_t i = 0; i < rx_n; i++) { tmc_write_hex8(rx_buf[i]); }
             }
             if (ok) {
+                // Extract version from the last valid response in rx_buf
+                uint8_t ver = 0;
+                for (uint8_t s = 0; s + 8 <= rx_n; s++) {
+                    if (rx_buf[s] != 0x05 || rx_buf[s+1] != 0xFF)  { continue; }
+                    if (rx_buf[s+7] != tmc_crc8(&rx_buf[s], 7))    { continue; }
+                    uint32_t ioin = ((uint32_t)rx_buf[s+3] << 24)
+                                  | ((uint32_t)rx_buf[s+4] << 16)
+                                  | ((uint32_t)rx_buf[s+5] <<  8)
+                                  |  (uint32_t)rx_buf[s+6];
+                    ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
+                    break;
+                }
                 TW(' '); TW('v'); TW('e'); TW('r'); TW('=');
                 tmc_write_hex8(ver);
                 TW(' '); TW('O'); TW('K');

@@ -118,7 +118,7 @@
 #ifdef DEFAULTS_RAMPS_BOARD
   #define HOMING_CYCLE_0 (1<<X_AXIS)   // Home X axis
   #define HOMING_CYCLE_1 (1<<Y_AXIS)   // Home Y axis
-  #define HOMING_CYCLE_2 (1<<Z_AXIS)   // OPTIONAL: Home Z axis
+  // #define HOMING_CYCLE_2 (1<<Z_AXIS)   // OPTIONAL: Home Z axis (disabled while tuning X/Y sensorless homing)
 #else
   #define HOMING_CYCLE_0 (1<<Z_AXIS)                // REQUIRED: First move Z to clear workspace.
   #define HOMING_CYCLE_1 ((1<<X_AXIS)|(1<<Y_AXIS))  // OPTIONAL: Then move X,Y at the same time.
@@ -140,7 +140,7 @@
 // cycle is still invoked by the $H command. This is disabled by default. It's here only to address
 // users that need to switch between a two-axis and three-axis machine. This is actually very rare.
 // If you have a two-axis machine, DON'T USE THIS. Instead, just alter the homing cycle for two-axes.
-// #define HOMING_SINGLE_AXIS_COMMANDS // Default disabled. Uncomment to enable.
+#define HOMING_SINGLE_AXIS_COMMANDS // Enabled: allows $HX, $HY, $HZ to home one axis at a time
 
 // After homing, Grbl will set by default the entire machine space into negative space, as is typical
 // for professional CNC machines, regardless of where the limit switches are located. Uncomment this
@@ -676,10 +676,13 @@
   // 0xFFFFF = no upper speed limit, so stallGuard fires at any speed during homing.
   #define TMC2209_TCOOLTHRS        0xFFFFF
 
-  // TPWMTHRS: motor speed above which driver switches from StealthChop to SpreadCycle.
-  // stallGuard ONLY works in SpreadCycle; TPWMTHRS is set to 0 during homing (forcing
-  // SpreadCycle) and restored to this value afterwards for quiet normal operation.
-  // ~300 = quiet below ~500 mm/min (tune to your steps/mm and desired speed range).
+  // TPWMTHRS: TSTEP threshold below which StealthChop is active (higher = StealthChop
+  // at faster speeds).  TPWMTHRS=0 is the chip reset default and means StealthChop
+  // always — do NOT rely on TPWMTHRS=0 to force SpreadCycle.  During homing the
+  // firmware sets GCONF.en_SpreadCycle=1 (unconditional SpreadCycle, required for
+  // stallGuard) and also sets TPWMTHRS=max as a belt-and-suspenders measure, then
+  // restores GCONF.en_SpreadCycle=0 and this value after homing completes.
+  // ~300 = StealthChop (quiet) below ~750 mm/min at 3200 steps/mm.
   #define TMC2209_TPWMTHRS_NORMAL  300
 
   // Default stallGuard thresholds: 0-255, higher = less sensitive (harder stall needed).

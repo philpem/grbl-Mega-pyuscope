@@ -48,6 +48,7 @@
 // GCONF bit positions
 // ---------------------------------------------------------------------------
 #define TMC_GCONF_I_SCALE_ANALOG  (1u << 0)  // Use external Vref (clear = internal)
+#define TMC_GCONF_EN_SPREADCYCLE  (1u << 2)  // 1 = force SpreadCycle; 0 = StealthChop (velocity-dependent via TPWMTHRS)
 #define TMC_GCONF_PDN_DISABLE     (1u << 6)  // Disable automatic standstill reduction via PDN pin; required for UART control
 
 // ---------------------------------------------------------------------------
@@ -85,8 +86,9 @@
 // sensorless homing should not be attempted on that axis.
 bool tmc2209_init(uint8_t axis);
 
-// Configure the driver for the homing approach pass: force SpreadCycle
-// (TPWMTHRS=0), enable stallGuard at all speeds (TCOOLTHRS=max), and load the
+// Configure the driver for the homing approach pass: force SpreadCycle by
+// setting GCONF.en_SpreadCycle=1 (stallGuard is silent in StealthChop),
+// enable stallGuard at all speeds (TCOOLTHRS=max, TPWMTHRS=max), and load the
 // seek-phase threshold from settings.tmc_sgthrs[axis][TMC_PHASE_SEEK].
 void tmc2209_homing_start(uint8_t axis);
 
@@ -94,8 +96,9 @@ void tmc2209_homing_start(uint8_t axis);
 // Called by limits_go_home() at the seek→locate phase transition.
 void tmc2209_set_sgthrs(uint8_t axis, uint8_t phase);
 
-// Restore normal operation after homing: disable stallGuard (TCOOLTHRS=0,
-// SGTHRS=0) and re-enable StealthChop (TPWMTHRS=TMC2209_TPWMTHRS_NORMAL).
+// Restore normal operation after homing: clear GCONF.en_SpreadCycle (restores
+// velocity-dependent StealthChop), disable stallGuard (TCOOLTHRS=0, SGTHRS=0),
+// and restore TPWMTHRS to TMC2209_TPWMTHRS_NORMAL.
 void tmc2209_homing_end(uint8_t axis);
 
 // Returns true if the last tmc2209_init() call for this axis succeeded.

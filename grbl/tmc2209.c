@@ -59,11 +59,6 @@
 //   cannot reliably sample them.
 #define TMC_ECHO_GUARD_BITS      4
 #define TMC_WRITE_ECHO_US        (TMC_BIT_US * (TMC_ECHO_GUARD_BITS + 8*10.0))
-// Time from end of TX to start of IC response (echo byte 3 duration + gap):
-//   echo byte 3: 4 guard bits + 10 data/stop bits = 14 bit-periods after TX end
-//   IC response gap: 4 bit-periods
-//   Extra margin: 2 bit-periods
-#define TMC_READ_TURNAROUND_US   (TMC_BIT_US * 20.0)
 
 // ---------------------------------------------------------------------------
 // Per-axis initialisation result (set by tmc2209_init, read by tmc2209_axis_ok)
@@ -223,34 +218,32 @@ bool tmc2209_read_reg(uint8_t axis, uint8_t reg, uint32_t *val)
     req[2] = reg & 0x7F;  // Read bit = 0
     req[3] = tmc_crc8(req, 3);
 
+    // After TX, the IC echoes the request back on PDN_UART.  In our 2-wire
+    // topology, most echo bytes overlap with TX, but 1-2 may trail after TX
+    // ends.  We read up to 12 bytes (4 echo + 8 response) and scan for the
+    // valid response frame (SYNC=0x05, addr=0xFF, correct CRC).
+    uint8_t buf[12];
+    uint8_t n = 0;
+
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
-    // Wait for the IC's echo of the request to finish and for the IC to
-    // prepare and start sending its response.  In our 2-wire topology the
-    // echo bytes overlap with our TX and are not cleanly receivable; we
-    // simply wait for the turnaround time then read the response directly.
-    _delay_us(TMC_READ_TURNAROUND_US);
-    // Receive 8-byte response
-    uint8_t resp[8];
-    for (uint8_t i = 0; i < 8; i++) {
-        if (!tmc_recv_byte(ax, &resp[i])) {
-            SREG = sreg;
-            return false;
-        }
+    for (n = 0; n < 12; n++) {
+        if (!tmc_recv_byte(ax, &buf[n])) { break; }
     }
     SREG = sreg;
 
-    // Validate CRC
-    if (resp[7] != tmc_crc8(resp, 7)) { return false; }
-    // Validate SYNC and master address (0xFF for replies to master)
-    if (resp[0] != 0x05 || resp[1] != 0xFF) { return false; }
-
-    *val = ((uint32_t)resp[3] << 24) |
-           ((uint32_t)resp[4] << 16) |
-           ((uint32_t)resp[5] <<  8) |
-            (uint32_t)resp[6];
-    return true;
+    // Scan received data for a valid 8-byte response frame
+    for (uint8_t s = 0; s + 8 <= n; s++) {
+        if (buf[s] != 0x05 || buf[s+1] != 0xFF) { continue; }
+        if (buf[s+7] != tmc_crc8(&buf[s], 7))   { continue; }
+        *val = ((uint32_t)buf[s+3] << 24) |
+               ((uint32_t)buf[s+4] << 16) |
+               ((uint32_t)buf[s+5] <<  8) |
+                (uint32_t)buf[s+6];
+        return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +271,11 @@ bool tmc2209_init(uint8_t axis)
     *ax->tx_port |=  (1 << ax->tx_bit);
     *ax->rx_ddr  &= ~(1 << ax->rx_bit);   // RX: input with pull-up
     *ax->rx_port |=  (1 << ax->rx_bit);
-    _delay_us(100);                        // let pull-up settle
+
+    // Allow the TMC2209 to finish its power-on reset and internal oscillator
+    // calibration.  The IC needs ~1 ms (typ.) after VCC, but we add generous
+    // margin.  Also allows the RX pull-up to settle.
+    _delay_ms(10);
 
     // --- Self-test: verify 1 kΩ coupling between TX and RX -------------------
     // Check both states: TX HIGH → RX HIGH, TX LOW → RX LOW.  Checking both
@@ -295,56 +292,64 @@ bool tmc2209_init(uint8_t axis)
     sei();
     bool loopback_ok = rx_high && rx_low;
 
+    // The loopback test creates short glitches on PDN_UART that the TMC2209's
+    // auto-baud detector may interpret as a start bit, locking onto a wrong
+    // baud rate.  Send a UART break (extended LOW) to reset the IC's UART
+    // state machine, then hold idle HIGH for it to recover.
+    cli();
+    *ax->tx_port &= ~(1 << ax->tx_bit);   // TX LOW (break)
+    _delay_us(TMC_BIT_US * 16);            // >12 bit-periods = framing error → UART reset
+    *ax->tx_port |=  (1 << ax->tx_bit);    // TX HIGH (idle)
+    sei();
+    _delay_ms(1);                          // let IC recover from break
+
     // --- Configure driver via UART ------------------------------------------
     tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
     tmc2209_write_reg(axis, TMC_REG_IHOLD_IRUN,
         TMC_IHOLD_IRUN_VAL(TMC2209_IHOLD, TMC2209_IRUN, 6));
 
     // --- Read IOIN: capture response for diagnostics -------------------------
+    // Read up to 12 bytes (4 possible echo + 8 response) and scan for the
+    // valid response frame.  Shows all received bytes in the diagnostic so
+    // we can see exactly what the IC sends.
     uint8_t req[4];
     req[0] = 0x05;
     req[1] = ax->addr;
     req[2] = TMC_REG_IOIN & 0x7F;
     req[3] = tmc_crc8(req, 3);
 
-    uint8_t resp_buf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-    int8_t  resp_fail = -1;   // index of first timed-out response byte, or -1 = all OK
+    uint8_t rx_buf[12];
+    uint8_t rx_n = 0;  // number of bytes actually received
 
     uint8_t sreg = SREG;
     cli();
     for (uint8_t i = 0; i < 4; i++) { tmc_send_byte(ax, req[i]); }
-    // Wait for the IC's request echo to finish + IC turnaround before response.
-    _delay_us(TMC_READ_TURNAROUND_US);
-    for (uint8_t i = 0; i < 8; i++) {
-        if (!tmc_recv_byte(ax, &resp_buf[i])) { resp_fail = (int8_t)i; break; }
+    for (rx_n = 0; rx_n < 12; rx_n++) {
+        if (!tmc_recv_byte(ax, &rx_buf[rx_n])) { break; }
     }
     SREG = sreg;
 
-    // --- Parse result -------------------------------------------------------
+    // --- Scan for valid response frame --------------------------------------
     uint8_t ver = 0;
-    bool crc_ok = false;
     bool ok = false;
-    if (resp_fail < 0) {
-        uint8_t exp_crc = tmc_crc8(resp_buf, 7);
-        crc_ok = (resp_buf[7] == exp_crc)
-               && (resp_buf[0] == 0x05)
-               && (resp_buf[1] == 0xFF);
-        if (crc_ok) {
-            uint32_t ioin = ((uint32_t)resp_buf[3] << 24)
-                          | ((uint32_t)resp_buf[4] << 16)
-                          | ((uint32_t)resp_buf[5] <<  8)
-                          |  (uint32_t)resp_buf[6];
-            ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
-            ok  = (ver == TMC2209_VERSION);
-        }
+    for (uint8_t s = 0; s + 8 <= rx_n; s++) {
+        if (rx_buf[s] != 0x05 || rx_buf[s+1] != 0xFF) { continue; }
+        if (rx_buf[s+7] != tmc_crc8(&rx_buf[s], 7))   { continue; }
+        uint32_t ioin = ((uint32_t)rx_buf[s+3] << 24)
+                      | ((uint32_t)rx_buf[s+4] << 16)
+                      | ((uint32_t)rx_buf[s+5] <<  8)
+                      |  (uint32_t)rx_buf[s+6];
+        ver = (uint8_t)((ioin >> TMC_IOIN_VERSION_SHIFT) & TMC_IOIN_VERSION_MASK);
+        ok  = (ver == TMC2209_VERSION);
+        break;
     }
 
     // --- Diagnostic message -------------------------------------------------
     // Examples:
-    //   [MSG:TMC2209 X lb=ok resp=05FF0600000021B8 crc=ok ver=21 OK]
+    //   [MSG:TMC2209 X lb=ok rx=9/05FF060021xxB8 ver=21 OK]
     //   [MSG:TMC2209 X lb=FAIL]
-    //   [MSG:TMC2209 X lb=ok resp=to@0 FAIL]
-    //   [MSG:TMC2209 X lb=ok resp=XXXXXXXXXXXXXXXX crc=err ver=00 FAIL]
+    //   [MSG:TMC2209 X lb=ok rx=0 FAIL]
+    //   [MSG:TMC2209 X lb=ok rx=8/XXXXXXXXXXXXXXXX FAIL]
     {
         #define TW(c) serial_write(c)
         TW('['); TW('M'); TW('S'); TW('G'); TW(':');
@@ -355,19 +360,20 @@ bool tmc2209_init(uint8_t axis)
         if (loopback_ok) { TW('o'); TW('k'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
         if (loopback_ok) {
             TW(' ');
-            // Response bytes
-            TW('r'); TW('e'); TW('s'); TW('p'); TW('=');
-            if (resp_fail >= 0) {
-                TW('t'); TW('o'); TW('@'); TW('0' + (uint8_t)resp_fail);
-            } else {
-                for (uint8_t i = 0; i < 8; i++) { tmc_write_hex8(resp_buf[i]); }
-                TW(' '); TW('c'); TW('r'); TW('c'); TW('=');
-                if (crc_ok) { TW('o'); TW('k'); } else { TW('e'); TW('r'); TW('r'); }
+            // Show byte count and all received bytes as hex
+            TW('r'); TW('x'); TW('=');
+            tmc_write_hex8(rx_n);
+            if (rx_n > 0) {
+                TW('/');
+                for (uint8_t i = 0; i < rx_n; i++) { tmc_write_hex8(rx_buf[i]); }
+            }
+            if (ok) {
                 TW(' '); TW('v'); TW('e'); TW('r'); TW('=');
                 tmc_write_hex8(ver);
+                TW(' '); TW('O'); TW('K');
+            } else {
+                TW(' '); TW('F'); TW('A'); TW('I'); TW('L');
             }
-            TW(' ');
-            if (ok) { TW('O'); TW('K'); } else { TW('F'); TW('A'); TW('I'); TW('L'); }
         }
         TW(']'); TW('\r'); TW('\n');
         #undef TW

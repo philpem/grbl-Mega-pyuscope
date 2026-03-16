@@ -116,9 +116,11 @@ static uint8_t tmc_crc8(const uint8_t *data, uint8_t len)
     for (uint8_t i = 0; i < len; i++) {
         uint8_t b = data[i];
         for (uint8_t j = 0; j < 8; j++) {
-            if ((crc ^ b) & 0x80) { crc = (crc << 1) ^ 0x07; }
-            else                  { crc <<= 1; }
-            b <<= 1;
+            // Process LSB first: XOR MSB of CRC with LSB of data byte.
+            // This matches the TMC2209 UART bit order (LSB first on the wire).
+            if ((crc >> 7) ^ (b & 0x01)) { crc = (crc << 1) ^ 0x07; }
+            else                         { crc <<= 1; }
+            b >>= 1;
         }
     }
     return crc;
@@ -278,24 +280,27 @@ bool tmc2209_init(uint8_t axis)
     *ax->rx_port |=  (1 << ax->rx_bit);
     _delay_us(100);                        // let pull-up settle
 
-    // --- Self-test: does TX LOW appear on RX? --------------------------------
-    // Drive TX LOW and check RX; if RX stays HIGH the 1k coupling or the
-    // RX→PDN_UART jumper is missing.  Restore TX HIGH before UART traffic.
+    // --- Self-test: verify 1 kΩ coupling between TX and RX -------------------
+    // Check both states: TX HIGH → RX HIGH, TX LOW → RX LOW.  Checking both
+    // prevents a false pass when PDN_UART is permanently pulled to GND (e.g. an
+    // MS3 jumper still installed on the RAMPS microstepping header).
     cli();
+    *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (should already be)
+    _delay_us(5);
+    bool rx_high = !!(*ax->rx_pin & (1 << ax->rx_bit));
     *ax->tx_port &= ~(1 << ax->tx_bit);   // TX LOW
     _delay_us(5);
-    bool loopback_ok = !(*ax->rx_pin & (1 << ax->rx_bit));  // RX should be LOW
-    *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (idle)
+    bool rx_low = !(*ax->rx_pin & (1 << ax->rx_bit));
+    *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (restore idle)
     sei();
+    bool loopback_ok = rx_high && rx_low;
 
     // --- Configure driver via UART ------------------------------------------
     tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
     tmc2209_write_reg(axis, TMC_REG_IHOLD_IRUN,
         TMC_IHOLD_IRUN_VAL(TMC2209_IHOLD, TMC2209_IRUN, 6));
 
-    // --- Read IOIN: capture all bytes for diagnostics -----------------------
-    // We send the 4-byte request, read back 4 echo bytes then the 8-byte reply,
-    // storing everything so the diagnostic message can show exactly what failed.
+    // --- Read IOIN: capture response for diagnostics -------------------------
     uint8_t req[4];
     req[0] = 0x05;
     req[1] = ax->addr;

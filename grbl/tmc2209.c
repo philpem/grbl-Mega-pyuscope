@@ -19,31 +19,46 @@
   Because TX and RX are separate physical pins (connected via 1 kΩ), the MCU
   holds TX high (idle) while receiving the driver's response, so there is no
   bus contention.
+
+  Delay strategy:
+    _delay_us()               — BROKEN with avr-gcc 7.x -flto (Arduino IDE default):
+                                floating-point fold deferred to link time → 0 cycles.
+    __builtin_avr_delay_cycles() — Still broken: generates a pure counting loop with
+                                no volatile barrier; LTO treats it as dead code.
+    #pragma GCC optimize("no-lto") — Does NOT prevent GIMPLE IR emission; ignored.
+    _delay_loop_2(n)          — SAFE: implemented as __asm__ volatile; the volatile
+                                qualifier on the asm guarantees the loop is emitted
+                                regardless of any optimisation flags, including LTO.
+                                Arduino SoftwareSerial uses this for the same reason.
 */
 
 #include "grbl.h"
 
 #ifdef TMC2209_SENSORLESS_HOMING
 
+#include <util/delay_basic.h>   // _delay_loop_2(): 4 cycles/iteration, volatile asm
 #include <avr/interrupt.h>
 
 // ---------------------------------------------------------------------------
-// Bit timing in CPU cycles — pure integer preprocessor arithmetic.
-//
-// avr-gcc 7.x with -flto cannot constant-fold _delay_us()'s floating-point
-// computation (F_CPU * us / 1e6) at link time; the result is silently 0 and
-// all delays become no-ops.  __builtin_avr_delay_cycles() with a preprocessor
-// integer constant is resolved before LTO ever sees the code, so it is immune
-// to this bug regardless of build system or -flto flags.
+// Bit timing.
+// _delay_loop_2(n) burns exactly n×4 CPU cycles via volatile asm — LTO-safe.
+// All loop counts use pure integer preprocessor arithmetic so the compiler
+// never sees a floating-point expression that could fold to 0 under LTO.
 // ---------------------------------------------------------------------------
+//
+//   cycles per bit = F_CPU / BAUD_RATE   (integer division, ~0.04% error at 19200)
+//   _delay_loop_2 iterations = cycles / 4
+//
+#define TMC_L2(cycles)  _delay_loop_2((uint16_t)((cycles) / 4U))
+
 #define TMC_CYCLES_BIT        ((uint32_t)(F_CPU) / (uint32_t)(TMC2209_BAUD_RATE))
 #define TMC_CYCLES_HALF_BIT   (TMC_CYCLES_BIT / 2UL)
 #define TMC_CYCLES_5US        ((uint32_t)(F_CPU) / 200000UL)
 #define TMC_CYCLES_1MS        ((uint32_t)(F_CPU) / 1000UL)
 #define TMC_CYCLES_10MS       ((uint32_t)(F_CPU) / 100UL)
-// Break: >12 bit-periods forces a UART framing error, resetting the IC's state machine
+// Break: >12 bit-periods forces a UART framing error, resetting IC UART state machine
 #define TMC_CYCLES_BREAK      (TMC_CYCLES_BIT * 16UL)
-// Post-write echo guard: (4 guard + 8 bytes × 10 bits) bit-periods
+// Post-write echo guard: (4 guard bits + 8 bytes × 10 bits) = 84 bit-periods
 #define TMC_CYCLES_WRITE_ECHO (TMC_CYCLES_BIT * 84UL)
 
 // Timeout for waiting for a RX start bit: 15 ms expressed as loop iterations.
@@ -139,17 +154,17 @@ static void tmc_send_byte(const tmc_axis_t *ax, uint8_t b)
 {
     // Start bit
     *ax->tx_port &= ~(1 << ax->tx_bit);
-    __builtin_avr_delay_cycles(TMC_CYCLES_BIT);
+    TMC_L2(TMC_CYCLES_BIT);
     // Data bits, LSB first
     for (uint8_t i = 0; i < 8; i++) {
         if (b & 0x01) { *ax->tx_port |=  (1 << ax->tx_bit); }
         else          { *ax->tx_port &= ~(1 << ax->tx_bit); }
         b >>= 1;
-        __builtin_avr_delay_cycles(TMC_CYCLES_BIT);
+        TMC_L2(TMC_CYCLES_BIT);
     }
     // Stop bit (idle = HIGH)
     *ax->tx_port |= (1 << ax->tx_bit);
-    __builtin_avr_delay_cycles(TMC_CYCLES_BIT);
+    TMC_L2(TMC_CYCLES_BIT);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,21 +178,21 @@ static bool tmc_recv_byte(const tmc_axis_t *ax, uint8_t *out)
     // Wait for start bit (line goes LOW)
     uint16_t timeout = TMC_RX_TIMEOUT_LOOPS;
     while (*ax->rx_pin & (1 << ax->rx_bit)) {
-        __builtin_avr_delay_cycles(TMC_CYCLES_5US);
+        TMC_L2(TMC_CYCLES_5US);
         if (!--timeout) { return false; }
     }
     // We are at the falling edge of the start bit; wait to its midpoint
-    __builtin_avr_delay_cycles(TMC_CYCLES_HALF_BIT);
+    TMC_L2(TMC_CYCLES_HALF_BIT);
     // Verify it really is a start bit (should still be low)
     if (*ax->rx_pin & (1 << ax->rx_bit)) { return false; }
     // Sample 8 data bits at the centre of each bit period
     uint8_t b = 0;
     for (uint8_t i = 0; i < 8; i++) {
-        __builtin_avr_delay_cycles(TMC_CYCLES_BIT);
+        TMC_L2(TMC_CYCLES_BIT);
         if (*ax->rx_pin & (1 << ax->rx_bit)) { b |= (1 << i); }
     }
     // Consume the stop bit
-    __builtin_avr_delay_cycles(TMC_CYCLES_BIT);
+    TMC_L2(TMC_CYCLES_BIT);
     *out = b;
     return true;
 }
@@ -209,7 +224,7 @@ void tmc2209_write_reg(uint8_t axis, uint8_t reg, uint32_t val)
     // the echo is still in progress the IC's 0-bits pull down the line and
     // corrupt the master's 1-bits.  This delay is outside cli() so the
     // stepper ISR continues to fire normally.
-    __builtin_avr_delay_cycles(TMC_CYCLES_WRITE_ECHO);
+    TMC_L2(TMC_CYCLES_WRITE_ECHO);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +300,7 @@ bool tmc2209_init(uint8_t axis)
     // Allow the TMC2209 to finish its power-on reset and internal oscillator
     // calibration.  The IC needs ~1 ms (typ.) after VCC, but we add generous
     // margin.  Also allows the RX pull-up to settle.
-    __builtin_avr_delay_cycles(TMC_CYCLES_10MS);
+    TMC_L2(TMC_CYCLES_10MS);
 
     // --- Self-test: verify 1 kΩ coupling between TX and RX -------------------
     // Check both states: TX HIGH → RX HIGH, TX LOW → RX LOW.  Checking both
@@ -293,10 +308,10 @@ bool tmc2209_init(uint8_t axis)
     // MS3 jumper still installed on the RAMPS microstepping header).
     cli();
     *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (should already be)
-    __builtin_avr_delay_cycles(TMC_CYCLES_5US);
+    TMC_L2(TMC_CYCLES_5US);
     bool rx_high = !!(*ax->rx_pin & (1 << ax->rx_bit));
     *ax->tx_port &= ~(1 << ax->tx_bit);   // TX LOW
-    __builtin_avr_delay_cycles(TMC_CYCLES_5US);
+    TMC_L2(TMC_CYCLES_5US);
     bool rx_low = !(*ax->rx_pin & (1 << ax->rx_bit));
     *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (restore idle)
     sei();
@@ -308,10 +323,10 @@ bool tmc2209_init(uint8_t axis)
     // state machine, then hold idle HIGH for it to recover.
     cli();
     *ax->tx_port &= ~(1 << ax->tx_bit);   // TX LOW (break)
-    __builtin_avr_delay_cycles(TMC_CYCLES_BREAK); // >12 bit-periods = framing error → UART reset
-    *ax->tx_port |=  (1 << ax->tx_bit);    // TX HIGH (idle)
+    TMC_L2(TMC_CYCLES_BREAK);             // >12 bit-periods = framing error → UART reset
+    *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (idle)
     sei();
-    __builtin_avr_delay_cycles(TMC_CYCLES_1MS);   // let IC recover from break
+    TMC_L2(TMC_CYCLES_1MS);               // let IC recover from break
 
     // --- Configure driver via UART ------------------------------------------
     tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
@@ -358,8 +373,8 @@ bool tmc2209_init(uint8_t axis)
     // Examples:
     //   [MSG:TMC2209 X lb=ok rx=9/05FF060021xxB8 ver=21 OK]
     //   [MSG:TMC2209 X lb=FAIL]
-    //   [MSG:TMC2209 X lb=ok rx=0 FAIL]
-    //   [MSG:TMC2209 X lb=ok rx=8/XXXXXXXXXXXXXXXX FAIL]
+    //   [MSG:TMC2209 X lb=ok rx=00 FAIL]
+    //   [MSG:TMC2209 X lb=ok rx=08/XXXXXXXXXXXXXXXX FAIL]
     {
         #define TW(c) serial_write(c)
         TW('['); TW('M'); TW('S'); TW('G'); TW(':');

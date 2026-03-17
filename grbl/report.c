@@ -661,4 +661,28 @@ void report_realtime_status()
     }
   #endif
   }
+
+  // Prints: [DBG:HOME <phase> ax=XY- lim=X--]
+  // Called from limits_go_home() at homing phase transitions.
+  // phase: short string — "INIT", "SEEK", "PULL", or "FEED"
+  // axes:  cycle_mask bitmask (bit 0=X, 1=Y, 2=Z)
+  void report_debug_homing_phase(const char *phase, uint8_t axes)
+  {
+    uint8_t ls = limits_get_state();
+    serial_write('['); serial_write('D'); serial_write('B'); serial_write('G'); serial_write(':');
+    serial_write('H'); serial_write('O'); serial_write('M'); serial_write('E'); serial_write(' ');
+    for (const char *p = phase; *p; p++) { serial_write((uint8_t)*p); }
+    serial_write(' ');
+    serial_write('a'); serial_write('x'); serial_write('=');
+    serial_write(axes & (1<<X_AXIS) ? 'X' : '-');
+    serial_write(axes & (1<<Y_AXIS) ? 'Y' : '-');
+    serial_write(axes & (1<<Z_AXIS) ? 'Z' : '-');
+    serial_write(' ');
+    serial_write('l'); serial_write('i'); serial_write('m'); serial_write('=');
+    serial_write(ls & (1<<X_AXIS) ? 'X' : '-');
+    serial_write(ls & (1<<Y_AXIS) ? 'Y' : '-');
+    serial_write(ls & (1<<Z_AXIS) ? 'Z' : '-');
+    serial_write(']');
+    report_util_line_feed();
+  }
 #endif

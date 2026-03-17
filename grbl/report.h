@@ -126,6 +126,11 @@ void report_build_info(char *line);
 
 #ifdef DEBUG
   void report_realtime_debug();
+  // Print a [DBG:HOME ...] line showing which homing phase just completed,
+  // which axes are in the cycle, and the current limit-switch state.
+  // phase: "INIT" | "SEEK" | "PULL" | "FEED"
+  // axes:  cycle_mask bitmask (bit 0=X, 1=Y, 2=Z)
+  void report_debug_homing_phase(const char *phase, uint8_t axes);
 #endif
 
 #endif

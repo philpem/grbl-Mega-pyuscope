@@ -285,6 +285,9 @@ void limits_go_home(uint8_t cycle_mask)
   #ifdef DEFAULTS_RAMPS_BOARD
     uint8_t limit_state, n_active_axis;
     uint8_t axislock[N_AXIS];
+    #ifdef DEBUG
+      report_debug_homing_phase("INIT", cycle_mask);
+    #endif
     do {
 
       system_convert_array_steps_to_mpos(target,sys_position);
@@ -381,6 +384,15 @@ void limits_go_home(uint8_t cycle_mask)
       } while (axislock_active(axislock));
       st_reset(); // Immediately force kill steppers and reset step segment buffer.
       delay_ms(settings.homing_debounce_delay); // Delay to allow transient dynamics to dissipate.
+      #ifdef DEBUG
+      {
+        const char *phase;
+        if (approach && homing_rate == settings.homing_feed_rate) { phase = "FEED"; }
+        else if (approach) { phase = "SEEK"; }
+        else { phase = "PULL"; }
+        report_debug_homing_phase(phase, cycle_mask);
+      }
+      #endif
 
       // Reverse direction and reset homing rate for locate cycle(s).
       approach = !approach;

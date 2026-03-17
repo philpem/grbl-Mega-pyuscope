@@ -230,8 +230,18 @@ void mc_homing_cycle(uint8_t cycle_mask)
   // Perform homing routine. NOTE: Special motion case. Only system reset works.
 
   #ifdef HOMING_SINGLE_AXIS_COMMANDS
-    if (cycle_mask) { limits_go_home(cycle_mask); } // Perform homing cycle based on mask.
-    else
+    if (cycle_mask) {
+      // Single-axis homing ($HX/$HY/$HZ): arm stallGuard if applicable, then home.
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (cycle_mask & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+        if (cycle_mask & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #endif
+      limits_go_home(cycle_mask);
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (cycle_mask & (1<<X_AXIS)) { tmc2209_homing_end(X_AXIS); }
+        if (cycle_mask & (1<<Y_AXIS)) { tmc2209_homing_end(Y_AXIS); }
+      #endif
+    } else
   #endif
   {
     // Search to engage all axes limit switches at faster homing seek rate.

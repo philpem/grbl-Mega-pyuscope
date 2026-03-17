@@ -535,7 +535,7 @@
   #define DEFAULT_INVERT_PROBE_PIN 0 // false
   #define DEFAULT_LASER_MODE 0 // false
   #define DEFAULT_HOMING_ENABLE 1  // true — require homing before motion
-  #define DEFAULT_HOMING_DIR_MASK 0 // home toward minimum (DIAG/limit on MIN side)
+  #define DEFAULT_HOMING_DIR_MASK 3 // X and Y home toward minimum (bit set = neg dir); DIAG/limit on MIN side
   // Homing rates: slow and gentle for a microscope stage.
   #define DEFAULT_HOMING_FEED_RATE  50.0  // mm/min (slow locate pass)
   #define DEFAULT_HOMING_SEEK_RATE  200.0 // mm/min (fast approach)

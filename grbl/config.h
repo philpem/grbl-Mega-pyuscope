@@ -213,8 +213,11 @@
 // NOTE: PLEASE DO NOT USE THIS, unless you have a situation that needs it.
 // #define INVERT_LIMIT_PIN_MASK ((1<<X_LIMIT_BIT)|(1<<Y_LIMIT_BIT)) // Default disabled. Uncomment to enable.
 #ifdef DEFAULTS_RAMPS_BOARD
-  // Only enable the following line if you have - (min) limit switches attached
-  //#define INVERT_MIN_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
+  // TMC2209 DIAG is open-drain active-LOW (stall = pin floats HIGH), which is
+  // the opposite polarity to a normally-open switch (triggered = LOW). Invert
+  // the X and Y MIN inputs so that DIAG HIGH (stall) is seen as "limit triggered".
+  // Z uses a real switch and does not need inversion.
+  #define INVERT_MIN_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS))
   // Only enable the following line if you have + (max) limit switches attached
   //#define INVERT_MAX_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
 #endif

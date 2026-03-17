@@ -40,16 +40,14 @@
 // To use with RAMPS 1.4 Board, comment out the above defines and uncomment the next two defines
 //#define DEFAULTS_RAMPS_BOARD
 //#define CPU_MAP_2560_RAMPS_BOARD
-//#ifdef DEFAULTS_RAMPS_BOARD
-//# define RAMPS_BOARD
-//#endif
 
 // To use with RAMPS 1.4 Board to control a microscope with Pyuscope, comment out the above defines and uncomment the next two defines
 #define DEFAULTS_RAMPS_BOARD_PYUSCOPE
 #define CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
-#ifdef DEFAULTS_RAMPS_BOARD_PYUSCOPE
-# define DEFAULTS_RAMPS_BOARD
-# define RAMPS_BOARD
+
+// RAMPS boards need RAMPS_BOARD_COMMON defining too
+#if defined(DEFAULTS_RAMPS_BOARD) || defined(DEFAULTS_RAMPS_BOARD_PYUSCOPE)
+# define PLATFORM_RAMPS
 #endif
 
 // Serial baud rate
@@ -214,12 +212,14 @@
 // normally-open(NO) and normally-closed(NC) switches installed on their machine.
 // NOTE: PLEASE DO NOT USE THIS, unless you have a situation that needs it.
 // #define INVERT_LIMIT_PIN_MASK ((1<<X_LIMIT_BIT)|(1<<Y_LIMIT_BIT)) // Default disabled. Uncomment to enable.
-#ifdef RAMPS_BOARD
+#ifdef DEFAULTS_RAMPS_BOARD
   // Only enable the following line if you have - (min) limit switches attached
   //#define INVERT_MIN_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
   // Only enable the following line if you have + (max) limit switches attached
   //#define INVERT_MAX_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
 #endif
+
+// Pyuscope/TMC2209 specific limit switch invert setting:
 #ifdef DEFAULTS_RAMPS_BOARD_PYUSCOPE
   // TMC2209 DIAG is open-drain active-LOW (stall = pin floats HIGH), which is
   // the opposite polarity to a normally-open switch (triggered = LOW). Invert

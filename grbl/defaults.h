@@ -452,7 +452,7 @@
   #define DEFAULT_HOMING_PULLOFF 1.0 // mm
 #endif
 
-#if defined(DEFAULTS_RAMPS_BOARD) && !defined(DEFAULTS_RAMPS_BOARD_PYUSCOPE)
+#ifdef DEFAULTS_RAMPS_BOARD
   // Generic conservative settings for a RAMPS CNC machine. You must update these yourself.
   // Keep in mind that Grbl is highly efficient and settings can be significantly different.
   // Especially when optimizing for a different CNC task like going from 3d printing to

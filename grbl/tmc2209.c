@@ -388,10 +388,10 @@ bool tmc2209_init(uint8_t axis)
     // state machine, then hold idle HIGH for it to recover.
     cli();
     *ax->tx_port &= ~(1 << ax->tx_bit);   // TX LOW (break)
-    TMC_L2(TMC_CYCLES_BREAK);             // >12 bit-periods = framing error → UART reset
+    TMC_L2(TMC_CYCLES_BREAK * 2);         // >12 bit-periods = framing error → UART reset
     *ax->tx_port |=  (1 << ax->tx_bit);   // TX HIGH (idle)
     sei();
-    TMC_L2(TMC_CYCLES_1MS);               // let IC recover from break
+    TMC_L2(TMC_CYCLES_1MS * 10);          // let IC recover from break
 
     // --- Address scan / fixed address --------------------------------------
     // If TMC2209_X/Y_ADDR was defined in config.h the address is fixed and

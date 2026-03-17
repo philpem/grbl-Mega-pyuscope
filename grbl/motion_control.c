@@ -235,6 +235,9 @@ void mc_homing_cycle(uint8_t cycle_mask)
       #ifdef TMC2209_SENSORLESS_HOMING
         if (cycle_mask & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
         if (cycle_mask & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+        #ifdef DEBUG
+          report_realtime_debug();
+        #endif
       #endif
       limits_go_home(cycle_mask);
       #ifdef TMC2209_SENSORLESS_HOMING
@@ -248,6 +251,9 @@ void mc_homing_cycle(uint8_t cycle_mask)
     #ifdef TMC2209_SENSORLESS_HOMING
       if (HOMING_CYCLE_0 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
       if (HOMING_CYCLE_0 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #ifdef DEBUG
+        report_realtime_debug(); // Print GCONF/SG/DRV state after homing_start (before inner loop silences output)
+      #endif
     #endif
     limits_go_home(HOMING_CYCLE_0);  // Homing cycle 0
     #ifdef TMC2209_SENSORLESS_HOMING

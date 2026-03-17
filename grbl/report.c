@@ -607,8 +607,58 @@ void report_realtime_status()
 
 
 #ifdef DEBUG
+  // Prints one nibble as an uppercase hex character.
+  static void dbg_hex_nibble(uint8_t n) {
+    n &= 0x0F;
+    serial_write(n < 10 ? '0' + n : 'A' + n - 10);
+  }
+  // Prints a 32-bit value as exactly 8 uppercase hex digits.
+  static void dbg_hex32(uint32_t v) {
+    dbg_hex_nibble((uint8_t)(v >> 28));
+    dbg_hex_nibble((uint8_t)(v >> 24));
+    dbg_hex_nibble((uint8_t)(v >> 20));
+    dbg_hex_nibble((uint8_t)(v >> 16));
+    dbg_hex_nibble((uint8_t)(v >> 12));
+    dbg_hex_nibble((uint8_t)(v >>  8));
+    dbg_hex_nibble((uint8_t)(v >>  4));
+    dbg_hex_nibble((uint8_t)(v      ));
+  }
+
+  // Triggered by sending byte 0x86 to the serial port.
+  // Reads and prints live TMC2209 register state for both axes:
+  //   GCONF     bit 2 = en_SpreadCycle (must be 1 during homing)
+  //             bit 6 = pdn_disable    (must be 1 always)
+  //   SG_RESULT real-time stallGuard load (0x000=stall, 0x1FF=no load)
+  //   DRV_STATUS bit 30=ot bit 29=otpw bit 24=stst bits4:0=CS_ACTUAL
   void report_realtime_debug()
   {
+  #ifdef TMC2209_SENSORLESS_HOMING
+    for (uint8_t ax = 0; ax < 2; ax++) {
+      uint32_t gconf = 0, sg_result = 0, drv_status = 0;
+      bool g_ok  = tmc2209_read_reg(ax, TMC_REG_GCONF,      &gconf);
+      bool s_ok  = tmc2209_read_reg(ax, TMC_REG_SG_RESULT,  &sg_result);
+      bool d_ok  = tmc2209_read_reg(ax, TMC_REG_DRV_STATUS, &drv_status);
 
+      serial_write('[');
+      serial_write('D'); serial_write('B'); serial_write('G'); serial_write(':');
+      serial_write('T'); serial_write('M'); serial_write('C');
+      serial_write(ax == 0 ? 'X' : 'Y'); serial_write(' ');
+
+      serial_write('G'); serial_write('C'); serial_write('O'); serial_write('N');
+      serial_write('F'); serial_write('=');
+      if (g_ok) { dbg_hex32(gconf); } else { serial_write('?'); }
+
+      serial_write(' ');
+      serial_write('S'); serial_write('G'); serial_write('=');
+      if (s_ok) { dbg_hex32(sg_result & 0x1FF); } else { serial_write('?'); }
+
+      serial_write(' ');
+      serial_write('D'); serial_write('R'); serial_write('V'); serial_write('=');
+      if (d_ok) { dbg_hex32(drv_status); } else { serial_write('?'); }
+
+      serial_write(']');
+      report_util_line_feed();
+    }
+  #endif
   }
 #endif

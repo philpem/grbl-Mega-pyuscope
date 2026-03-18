@@ -682,16 +682,15 @@
   #define TMC2209_IRUN             16       // Run current (~50% of max)
   #define TMC2209_IHOLD            4        // Hold current (~12%); reduces heat/vibration
 
-  // TCOOLTHRS: stepper TSTEP ticks below which stallGuard/CoolStep are active.
+  // TCOOLTHRS: upper velocity threshold for stallGuard DIAG output.
+  // stallGuard4 fires DIAG when: TCOOLTHRS >= TSTEP > TPWMTHRS
   // 0xFFFFF = no upper speed limit, so stallGuard fires at any speed during homing.
   #define TMC2209_TCOOLTHRS        0xFFFFF
 
   // TPWMTHRS: TSTEP threshold below which StealthChop is active (higher = StealthChop
-  // at faster speeds).  TPWMTHRS=0 is the chip reset default and means StealthChop
-  // always — do NOT rely on TPWMTHRS=0 to force SpreadCycle.  During homing the
-  // firmware sets GCONF.en_SpreadCycle=1 (unconditional SpreadCycle, required for
-  // stallGuard) and also sets TPWMTHRS=max as a belt-and-suspenders measure, then
-  // restores GCONF.en_SpreadCycle=0 and this value after homing completes.
+  // at faster speeds).  During homing, TPWMTHRS is set to 0 so that the DIAG
+  // condition (TSTEP > TPWMTHRS) is satisfied at all speeds.  en_SpreadCycle is
+  // kept clear because TMC2209 StallGuard4 only works in StealthChop mode.
   // ~300 = StealthChop (quiet) below ~750 mm/min at 3200 steps/mm.
   #define TMC2209_TPWMTHRS_NORMAL  300
 

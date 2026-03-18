@@ -420,7 +420,7 @@ bool tmc2209_init(uint8_t axis)
     if (ok) {
         tmc_addr[axis] = found;
         // Configure the driver with the discovered address
-        tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
+        tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_BASE);
         tmc2209_write_reg(axis, TMC_REG_IHOLD_IRUN,
             TMC_IHOLD_IRUN_VAL(TMC2209_IHOLD, TMC2209_IRUN, 6));
     }
@@ -487,15 +487,14 @@ bool tmc2209_axis_ok(uint8_t axis)
 void tmc2209_homing_start(uint8_t axis)
 {
     if (axis > 1) { return; }
-    // Force SpreadCycle unconditionally.  TPWMTHRS=0 is the power-on default
-    // and means "StealthChop always"; stallGuard is silent in StealthChop.
-    // Setting GCONF.en_SpreadCycle=1 bypasses the velocity threshold entirely
-    // and guarantees SpreadCycle regardless of TPWMTHRS.  TPWMTHRS is also
-    // set to max so that the mode is correct even before the GCONF write
-    // propagates.
-    tmc2209_write_reg(axis, TMC_REG_GCONF,
-        TMC_GCONF_PDN_DISABLE | TMC_GCONF_EN_SPREADCYCLE);
-    tmc2209_write_reg(axis, TMC_REG_TPWMTHRS, 0xFFFFF);
+    // TMC2209 StallGuard4 only works in StealthChop mode (NOT SpreadCycle).
+    // DIAG fires when SG_RESULT < 2*SGTHRS, but only when:
+    //   TCOOLTHRS >= TSTEP > TPWMTHRS
+    // So: TPWMTHRS=0 ensures StealthChop at all speeds and the lower bound
+    //     is always satisfied; TCOOLTHRS=max ensures the upper bound is met.
+    //     en_SpreadCycle must be CLEAR to stay in StealthChop.
+    tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_BASE);  // StealthChop, no SpreadCycle
+    tmc2209_write_reg(axis, TMC_REG_TPWMTHRS, 0);            // StealthChop at all speeds
     // Enable stallGuard across the full speed range
     tmc2209_write_reg(axis, TMC_REG_TCOOLTHRS, TMC2209_TCOOLTHRS);
     // Load seek-phase threshold
@@ -516,9 +515,8 @@ void tmc2209_homing_end(uint8_t axis)
     // Disable stallGuard so normal moves don't false-trigger
     tmc2209_write_reg(axis, TMC_REG_TCOOLTHRS, 0);
     tmc2209_write_reg(axis, TMC_REG_SGTHRS, 0);
-    // Restore velocity-dependent StealthChop: clear en_SpreadCycle and set
-    // TPWMTHRS back to the normal value (StealthChop below ~TPWMTHRS speed).
-    tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_PDN_DISABLE);
+    // Restore normal TPWMTHRS for velocity-dependent StealthChop/SpreadCycle transition
+    tmc2209_write_reg(axis, TMC_REG_GCONF, TMC_GCONF_BASE);
     tmc2209_write_reg(axis, TMC_REG_TPWMTHRS, TMC2209_TPWMTHRS_NORMAL);
 }
 

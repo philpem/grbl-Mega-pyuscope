@@ -359,6 +359,29 @@ void limits_go_home(uint8_t cycle_mask)
 
         st_prep_buffer(); // Check and prep segment buffer. NOTE: Should take no longer than 200us.
 
+        #if defined(DEBUG) && defined(TMC2209_SENSORLESS_HOMING)
+          // Periodically read and print SG_RESULT during homing approach.
+          // ~8ms per read with interrupts disabled — only do this every 128 iterations.
+          if (approach) {
+            static uint8_t sg_counter = 0;
+            if (++sg_counter == 0) {  // wraps every 256 iterations
+              for (uint8_t sg_ax = 0; sg_ax < 2; sg_ax++) {
+                if (cycle_mask & (1 << sg_ax)) {
+                  uint32_t sg_val = 0;
+                  tmc2209_read_reg(sg_ax, TMC_REG_SG_RESULT, &sg_val);
+                  serial_write('[');
+                  serial_write('S'); serial_write('G');
+                  serial_write(sg_ax == 0 ? 'X' : 'Y');
+                  serial_write(':');
+                  print_uint32_base10(sg_val & 0x1FF);
+                  serial_write(']');
+                  printPgmString(PSTR("\r\n"));
+                }
+              }
+            }
+          }
+        #endif
+
         // Exit routines: No time to run protocol_execute_realtime() in this loop.
         if (sys_rt_exec_state & (EXEC_SAFETY_DOOR | EXEC_RESET | EXEC_CYCLE_STOP)) {
           uint8_t rt_exec = sys_rt_exec_state;

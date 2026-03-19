@@ -240,10 +240,10 @@
   #define CONTROL_DDR       DDRK
   #define CONTROL_PIN       PINK
   #define CONTROL_PORT      PORTK
-  #define CONTROL_RESET_BIT         1  // Pin A9 - RAMPS Aux 2 Port
-  #define CONTROL_FEED_HOLD_BIT     2  // Pin A10 - RAMPS Aux 2 Port
-  #define CONTROL_CYCLE_START_BIT   3  // Pin A11 - RAMPS Aux 2 Port
-  #define CONTROL_SAFETY_DOOR_BIT   4  // Pin A12 - RAMPS Aux 2 Port
+  #define CONTROL_RESET_BIT         0  // MEGA2560 Analog Pin 8
+  #define CONTROL_FEED_HOLD_BIT     1  // MEGA2560 Analog Pin 9
+  #define CONTROL_CYCLE_START_BIT   2  // MEGA2560 Analog Pin 10
+  #define CONTROL_SAFETY_DOOR_BIT   3  // MEGA2560 Analog Pin 11
   #define CONTROL_INT       PCIE2  // Pin change interrupt enable pin
   #define CONTROL_INT_vect  PCINT2_vect
   #define CONTROL_PCMSK     PCMSK2 // Pin change interrupt register
@@ -273,14 +273,14 @@
 
   // 1/8 Prescaler, 16-bit Fast PWM mode
   #define SPINDLE_TCCRA_INIT_MASK ((1<<WGM40) | (1<<WGM41))
-  #define SPINDLE_TCCRB_INIT_MASK ((1<<WGM42) | (1<<WGM43) | (1<<CS41)) 
+  #define SPINDLE_TCCRB_INIT_MASK ((1<<WGM42) | (1<<WGM43) | (1<<CS41))
   #define SPINDLE_OCRA_REGISTER   OCR4A // 16-bit Fast PWM mode requires top reset value stored here.
   #define SPINDLE_OCRA_TOP_VALUE  0x0400 // PWM counter reset value. Should be the same as PWM_MAX_VALUE in hex.
 
   // Define spindle output pins.
   #define SPINDLE_PWM_DDR   DDRH
   #define SPINDLE_PWM_PORT  PORTH
-  #define SPINDLE_PWM_BIT   5 // MEGA2560 Digital Pin 8 
+  #define SPINDLE_PWM_BIT   5 // MEGA2560 Digital Pin 8
 
 #endif
 
@@ -392,8 +392,12 @@
   #define CONTROL_DDR       DDRK
   #define CONTROL_PIN       PINK
   #define CONTROL_PORT      PORTK
-  #define CONTROL_RESET_BIT         1  // Pin A9 - RAMPS Aux 2 Port
-  #define CONTROL_FEED_HOLD_BIT     2  // Pin A10 - RAMPS Aux 2 Port
+  // A9 (PK1) and A10 (PK2) are repurposed as TMC2209 UART RX lines for the
+  // X and Y drivers respectively (via 1kΩ coupling to PDN_UART on each driver).
+  // RESET and FEED_HOLD are therefore remapped to A13 (PK5) and A14 (PK6);
+  // both are on AUX-2 so the same PORTK / PCIE2 interrupt continues to work.
+  #define CONTROL_RESET_BIT         5  // Pin A13 - AUX-2 (remapped from A9/PK1)
+  #define CONTROL_FEED_HOLD_BIT     6  // Pin A14 - AUX-2 (remapped from A10/PK2)
   #define CONTROL_CYCLE_START_BIT   3  // Pin A11 - RAMPS Aux 2 Port
   #define CONTROL_SAFETY_DOOR_BIT   4  // Pin A12 - RAMPS Aux 2 Port
   #define CONTROL_INT       PCIE2  // Pin change interrupt enable pin
@@ -407,6 +411,27 @@
   #define PROBE_PORT      PORTK
   #define PROBE_BIT       7  // MEGA2560 Analog Pin 15
   #define PROBE_MASK      (1<<PROBE_BIT)
+
+  // TMC2209 single-wire software UART pins (AUX-2 connector).
+  // A 1k resistor must be fitted between each TX and RX pair.
+  // The driver MS3 pin must be jumpered to its PDN_UART pad to connect PDN_UART.
+  // X axis: TX = D40 (PG1), RX = A9 (PK1)
+  #define TMC_X_TX_DDR    DDRG
+  #define TMC_X_TX_PORT   PORTG
+  #define TMC_X_TX_BIT    1
+  #define TMC_X_RX_DDR    DDRK
+  #define TMC_X_RX_PORT   PORTK
+  #define TMC_X_RX_PIN    PINK
+  #define TMC_X_RX_BIT    1
+
+  // Y axis: TX = A5 (PF5), RX = A10 (PK2)
+  #define TMC_Y_TX_DDR    DDRF
+  #define TMC_Y_TX_PORT   PORTF
+  #define TMC_Y_TX_BIT    5
+  #define TMC_Y_RX_DDR    DDRK
+  #define TMC_Y_RX_PORT   PORTK
+  #define TMC_Y_RX_PIN    PINK
+  #define TMC_Y_RX_BIT    2
 
   // Advanced Configuration Below You should not need to touch these variables
   // Spindle (halogen lamp) PWM on Digital Pin 8 - Ramps 1.4 heated bed MOSFET (12v output with heat sink)

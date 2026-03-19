@@ -47,6 +47,7 @@
 #define EXEC_ALARM_HOMING_FAIL_DOOR     7
 #define EXEC_ALARM_HOMING_FAIL_PULLOFF  8
 #define EXEC_ALARM_HOMING_FAIL_APPROACH 9
+#define EXEC_ALARM_TMC2209_FAIL         10 // TMC2209 driver not responding at startup; sensorless homing unavailable
 
 // Override bit maps. Realtime bitflags to control feed, rapid, spindle, and coolant overrides.
 // Spindle/coolant and feed/rapids are separated into two controlling flag variables.
@@ -123,7 +124,7 @@ typedef struct {
   uint8_t soft_limit;          // Tracks soft limit errors for the state machine. (boolean)
   uint8_t step_control;        // Governs the step segment generator depending on system state.
   uint8_t probe_succeeded;     // Tracks if last probing cycle was successful.
-  #ifdef DEFAULTS_RAMPS_BOARD
+  #ifdef PLATFORM_RAMPS
     uint8_t homing_axis_lock[N_AXIS];    // Locks axes when limits engage. Used as an axis motion mask in the stepper ISR.
   #else
     uint8_t homing_axis_lock;    // Locks axes when limits engage. Used as an axis motion mask in the stepper ISR.

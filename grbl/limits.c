@@ -32,7 +32,7 @@
 
 void limits_init()
 {
-  #ifdef DEFAULTS_RAMPS_BOARD
+  #ifdef PLATFORM_RAMPS
     // Set as input pins
     MIN_LIMIT_DDR(0) &= ~(1<<MIN_LIMIT_BIT(0));
     MIN_LIMIT_DDR(1) &= ~(1<<MIN_LIMIT_BIT(1));
@@ -69,6 +69,12 @@ void limits_init()
         WDTCSR = (1<<WDP0); // Set time-out at ~32msec.
       #endif
     #endif // DISABLE_HW_LIMITS
+    #ifdef TMC2209_SENSORLESS_HOMING
+      // Initialise TMC2209 drivers for sensorless homing on X and Y axes.
+      // Reports [MSG:TMC2209 X OK/FAIL] on the serial port for each axis.
+      tmc2209_init(X_AXIS);
+      tmc2209_init(Y_AXIS);
+    #endif
   #else
     LIMIT_DDR &= ~(LIMIT_MASK); // Set as input pins
 
@@ -90,14 +96,14 @@ void limits_init()
       WDTCSR |= (1<<WDCE) | (1<<WDE);
       WDTCSR = (1<<WDP0); // Set time-out at ~32msec.
     #endif
-  #endif // DEFAULTS_RAMPS_BOARD
+  #endif // PLATFORM_RAMPS
 }
 
 
 // Disables hard limits.
 void limits_disable()
 {
-  #ifdef DEFAULTS_RAMPS_BOARD
+  #ifdef PLATFORM_RAMPS
     #ifndef DISABLE_HW_LIMITS
      LIMIT_PCMSK &= ~LIMIT_MASK;  // Disable specific pins of the Pin Change Interrupt
      PCICR &= ~(1 << LIMIT_INT);  // Disable Pin Change Interrupt
@@ -105,14 +111,14 @@ void limits_disable()
   #else
     LIMIT_PCMSK &= ~LIMIT_MASK;  // Disable specific pins of the Pin Change Interrupt
     PCICR &= ~(1 << LIMIT_INT);  // Disable Pin Change Interrupt
-  #endif // DEFAULTS_RAMPS_BOARD
+  #endif // PLATFORM_RAMPS
 }
-#ifdef DEFAULTS_RAMPS_BOARD  
+#ifdef PLATFORM_RAMPS  
   static volatile uint8_t * const max_limit_pins[N_AXIS] = {&MAX_LIMIT_PIN(0), &MAX_LIMIT_PIN(1), &MAX_LIMIT_PIN(2)};
   static volatile uint8_t * const min_limit_pins[N_AXIS] = {&MIN_LIMIT_PIN(0), &MIN_LIMIT_PIN(1), &MIN_LIMIT_PIN(2)};
   static const uint8_t max_limit_bits[N_AXIS] = {MAX_LIMIT_BIT(0), MAX_LIMIT_BIT(1), MAX_LIMIT_BIT(2)};
   static const uint8_t min_limit_bits[N_AXIS] = {MIN_LIMIT_BIT(0), MIN_LIMIT_BIT(1), MIN_LIMIT_BIT(2)};
-#endif // DEFAULTS_RAMPS_BOARD
+#endif // PLATFORM_RAMPS
 
 // Returns limit state as a bit-wise uint8 variable. Each bit indicates an axis limit, where 
 // triggered is 1 and not triggered is 0. Invert mask is applied. Axes are defined by their
@@ -120,7 +126,7 @@ void limits_disable()
 uint8_t limits_get_state()
 {
   uint8_t limit_state = 0;
-  #ifdef DEFAULTS_RAMPS_BOARD
+  #ifdef PLATFORM_RAMPS
     uint8_t pin;
     uint8_t idx;
     #ifdef INVERT_LIMIT_PIN_MASK
@@ -158,10 +164,10 @@ uint8_t limits_get_state()
       }
     }
     return(limit_state);
-  #endif //DEFAULTS_RAMPS_BOARD
+  #endif //PLATFORM_RAMPS
 }
 
-#ifdef DEFAULTS_RAMPS_BOARD
+#ifdef PLATFORM_RAMPS
   #ifndef DISABLE_HW_LIMITS
     #error "HW limits are not implemented"
   #endif
@@ -217,9 +223,9 @@ uint8_t limits_get_state()
       }
     }
   #endif
-#endif // DEFAULTS_RAMPS_BOARD
+#endif // PLATFORM_RAMPS
 
-#ifdef DEFAULTS_RAMPS_BOARD
+#ifdef PLATFORM_RAMPS
   static uint8_t axislock_active(uint8_t *axislock)
   {
     uint8_t res = 0;
@@ -233,7 +239,7 @@ uint8_t limits_get_state()
  
     return res;
   }
-#endif // DEFAULTS_RAMPS_BOARD
+#endif // PLATFORM_RAMPS
 
  
 // Homes the specified cycle axes, sets the machine position, and performs a pull-off motion after
@@ -276,9 +282,12 @@ void limits_go_home(uint8_t cycle_mask)
   // Set search mode with approach at seek rate to quickly engage the specified cycle_mask limit switches.
   bool approach = true;
   float homing_rate = settings.homing_seek_rate;
-  #ifdef DEFAULTS_RAMPS_BOARD
+  #ifdef PLATFORM_RAMPS
     uint8_t limit_state, n_active_axis;
     uint8_t axislock[N_AXIS];
+    #ifdef DEBUG
+      report_debug_homing_phase("INIT", cycle_mask);
+    #endif
     do {
 
       system_convert_array_steps_to_mpos(target,sys_position);
@@ -374,7 +383,24 @@ void limits_go_home(uint8_t cycle_mask)
 
       } while (axislock_active(axislock));
       st_reset(); // Immediately force kill steppers and reset step segment buffer.
+      #ifdef TMC2209_SENSORLESS_HOMING
+        // After a stall-triggered approach, pulse ENN to clear the TMC2209 stall latch
+        // so the driver will respond to step pulses again for the pull-off move.
+        if (approach) {
+          if (cycle_mask & (1<<X_AXIS)) { tmc2209_clear_stall(X_AXIS); }
+          if (cycle_mask & (1<<Y_AXIS)) { tmc2209_clear_stall(Y_AXIS); }
+        }
+      #endif
       delay_ms(settings.homing_debounce_delay); // Delay to allow transient dynamics to dissipate.
+      #ifdef DEBUG
+      {
+        const char *phase;
+        if (approach && homing_rate == settings.homing_feed_rate) { phase = "FEED"; }
+        else if (approach) { phase = "SEEK"; }
+        else { phase = "PULL"; }
+        report_debug_homing_phase(phase, cycle_mask);
+      }
+      #endif
 
       // Reverse direction and reset homing rate for locate cycle(s).
       approach = !approach;
@@ -383,6 +409,12 @@ void limits_go_home(uint8_t cycle_mask)
       if (approach) {
         max_travel = settings.homing_pulloff*HOMING_AXIS_LOCATE_SCALAR;
         homing_rate = settings.homing_feed_rate;
+        #ifdef TMC2209_SENSORLESS_HOMING
+          // Entering the slow locate pass: switch to the (more sensitive) feed-phase
+          // stallGuard threshold for each axis that is part of this homing cycle.
+          if (cycle_mask & (1<<X_AXIS)) { tmc2209_set_sgthrs(X_AXIS, TMC_PHASE_FEED); }
+          if (cycle_mask & (1<<Y_AXIS)) { tmc2209_set_sgthrs(Y_AXIS, TMC_PHASE_FEED); }
+        #endif
       } else {
         max_travel = settings.homing_pulloff;
         homing_rate = settings.homing_seek_rate;
@@ -498,7 +530,7 @@ void limits_go_home(uint8_t cycle_mask)
         homing_rate = settings.homing_seek_rate;
       }
     } while (n_cycle-- > 0);
-  #endif // DEFAULTS_RAMPS_BOARD
+  #endif // PLATFORM_RAMPS
 
   // The active cycle axes should now be homed and machine limits have been located. By
   // default, Grbl defines machine space as all negative, as do most CNCs. Since limit switches

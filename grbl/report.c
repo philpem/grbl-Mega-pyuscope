@@ -204,6 +204,12 @@ void report_grbl_settings() {
   report_util_float_setting(30,settings.rpm_max,N_DECIMAL_RPMVALUE);
   report_util_float_setting(31,settings.rpm_min,N_DECIMAL_RPMVALUE);
   report_util_uint8_setting(32,bit_istrue(settings.flags,BITFLAG_LASER_MODE));
+  #ifdef TMC2209_SENSORLESS_HOMING
+  report_util_uint8_setting(40,settings.tmc_sgthrs[0][0]);
+  report_util_uint8_setting(41,settings.tmc_sgthrs[0][1]);
+  report_util_uint8_setting(42,settings.tmc_sgthrs[1][0]);
+  report_util_uint8_setting(43,settings.tmc_sgthrs[1][1]);
+  #endif
   // Print axis settings
   uint8_t idx, set_idx;
   uint8_t val = AXIS_SETTINGS_START_VAL;
@@ -601,8 +607,82 @@ void report_realtime_status()
 
 
 #ifdef DEBUG
+  // Prints one nibble as an uppercase hex character.
+  static void dbg_hex_nibble(uint8_t n) {
+    n &= 0x0F;
+    serial_write(n < 10 ? '0' + n : 'A' + n - 10);
+  }
+  // Prints a 32-bit value as exactly 8 uppercase hex digits.
+  static void dbg_hex32(uint32_t v) {
+    dbg_hex_nibble((uint8_t)(v >> 28));
+    dbg_hex_nibble((uint8_t)(v >> 24));
+    dbg_hex_nibble((uint8_t)(v >> 20));
+    dbg_hex_nibble((uint8_t)(v >> 16));
+    dbg_hex_nibble((uint8_t)(v >> 12));
+    dbg_hex_nibble((uint8_t)(v >>  8));
+    dbg_hex_nibble((uint8_t)(v >>  4));
+    dbg_hex_nibble((uint8_t)(v      ));
+  }
+
+  // Triggered by sending byte 0x86 to the serial port.
+  // Reads and prints live TMC2209 register state for both axes:
+  //   GCONF     bit 2 = en_SpreadCycle (must be 1 during homing)
+  //             bit 6 = pdn_disable    (must be 1 always)
+  //   SG_RESULT real-time stallGuard load (0x000=stall, 0x1FF=no load)
+  //   DRV_STATUS bit 30=ot bit 29=otpw bit 24=stst bits4:0=CS_ACTUAL
   void report_realtime_debug()
   {
+  #ifdef TMC2209_SENSORLESS_HOMING
+    for (uint8_t ax = 0; ax < 2; ax++) {
+      uint32_t gconf = 0, sg_result = 0, drv_status = 0;
+      bool g_ok  = tmc2209_read_reg(ax, TMC_REG_GCONF,      &gconf);
+      bool s_ok  = tmc2209_read_reg(ax, TMC_REG_SG_RESULT,  &sg_result);
+      bool d_ok  = tmc2209_read_reg(ax, TMC_REG_DRV_STATUS, &drv_status);
 
+      serial_write('[');
+      serial_write('D'); serial_write('B'); serial_write('G'); serial_write(':');
+      serial_write('T'); serial_write('M'); serial_write('C');
+      serial_write(ax == 0 ? 'X' : 'Y'); serial_write(' ');
+
+      serial_write('G'); serial_write('C'); serial_write('O'); serial_write('N');
+      serial_write('F'); serial_write('=');
+      if (g_ok) { dbg_hex32(gconf); } else { serial_write('?'); }
+
+      serial_write(' ');
+      serial_write('S'); serial_write('G'); serial_write('=');
+      if (s_ok) { dbg_hex32(sg_result & 0x1FF); } else { serial_write('?'); }
+
+      serial_write(' ');
+      serial_write('D'); serial_write('R'); serial_write('V'); serial_write('=');
+      if (d_ok) { dbg_hex32(drv_status); } else { serial_write('?'); }
+
+      serial_write(']');
+      report_util_line_feed();
+    }
+  #endif
+  }
+
+  // Prints: [DBG:HOME <phase> ax=XY- lim=X--]
+  // Called from limits_go_home() at homing phase transitions.
+  // phase: short string — "INIT", "SEEK", "PULL", or "FEED"
+  // axes:  cycle_mask bitmask (bit 0=X, 1=Y, 2=Z)
+  void report_debug_homing_phase(const char *phase, uint8_t axes)
+  {
+    uint8_t ls = limits_get_state();
+    serial_write('['); serial_write('D'); serial_write('B'); serial_write('G'); serial_write(':');
+    serial_write('H'); serial_write('O'); serial_write('M'); serial_write('E'); serial_write(' ');
+    for (const char *p = phase; *p; p++) { serial_write((uint8_t)*p); }
+    serial_write(' ');
+    serial_write('a'); serial_write('x'); serial_write('=');
+    serial_write(axes & (1<<X_AXIS) ? 'X' : '-');
+    serial_write(axes & (1<<Y_AXIS) ? 'Y' : '-');
+    serial_write(axes & (1<<Z_AXIS) ? 'Z' : '-');
+    serial_write(' ');
+    serial_write('l'); serial_write('i'); serial_write('m'); serial_write('=');
+    serial_write(ls & (1<<X_AXIS) ? 'X' : '-');
+    serial_write(ls & (1<<Y_AXIS) ? 'Y' : '-');
+    serial_write(ls & (1<<Z_AXIS) ? 'Z' : '-');
+    serial_write(']');
+    report_util_line_feed();
   }
 #endif

@@ -42,8 +42,13 @@
 //#define CPU_MAP_2560_RAMPS_BOARD
 
 // To use with RAMPS 1.4 Board to control a microscope with Pyuscope, comment out the above defines and uncomment the next two defines
-#define DEFAULTS_RAMPS_BOARD
+#define DEFAULTS_RAMPS_BOARD_PYUSCOPE
 #define CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
+
+// RAMPS boards need RAMPS_BOARD_COMMON defining too
+#if defined(DEFAULTS_RAMPS_BOARD) || defined(DEFAULTS_RAMPS_BOARD_PYUSCOPE)
+# define PLATFORM_RAMPS
+#endif
 
 // Serial baud rate
 // #define BAUD_RATE 230400
@@ -110,15 +115,16 @@
 // on separate pin, but homed in one cycle. Also, it should be noted that the function of hard limits
 // will not be affected by pin sharing.
 // NOTE: Defaults are set for a traditional 3-axis CNC machine. Z-axis first to clear, followed by X & Y.
-#ifdef DEFAULTS_RAMPS_BOARD
+#if defined(DEFAULTS_RAMPS_BOARD) || defined(DEFAULTS_RAMPS_BOARD_PYUSCOPE)
+  // RAMPS / Pyuscope: X first (TMC2209 sensorless), then Y, Z not homed.
   #define HOMING_CYCLE_0 (1<<X_AXIS)   // Home X axis
   #define HOMING_CYCLE_1 (1<<Y_AXIS)   // Home Y axis
-  #define HOMING_CYCLE_2 (1<<Z_AXIS)   // OPTIONAL: Home Z axis 
+  // #define HOMING_CYCLE_2 (1<<Z_AXIS)   // OPTIONAL: Home Z axis
 #else
   #define HOMING_CYCLE_0 (1<<Z_AXIS)                // REQUIRED: First move Z to clear workspace.
   #define HOMING_CYCLE_1 ((1<<X_AXIS)|(1<<Y_AXIS))  // OPTIONAL: Then move X,Y at the same time.
   // #define HOMING_CYCLE_2                         // OPTIONAL: Uncomment and add axes mask to enable
-#endif // DEFAULTS_RAMPS_BOARD
+#endif // DEFAULTS_RAMPS_BOARD || DEFAULTS_RAMPS_BOARD_PYUSCOPE
 
 // NOTE: The following are two examples to setup homing for 2-axis machines.
 // #define HOMING_CYCLE_0 ((1<<X_AXIS)|(1<<Y_AXIS))  // NOT COMPATIBLE WITH COREXY: Homes both X-Y in one cycle. 
@@ -135,7 +141,7 @@
 // cycle is still invoked by the $H command. This is disabled by default. It's here only to address
 // users that need to switch between a two-axis and three-axis machine. This is actually very rare.
 // If you have a two-axis machine, DON'T USE THIS. Instead, just alter the homing cycle for two-axes.
-// #define HOMING_SINGLE_AXIS_COMMANDS // Default disabled. Uncomment to enable.
+#define HOMING_SINGLE_AXIS_COMMANDS // Enabled: allows $HX, $HY, $HZ to home one axis at a time
 
 // After homing, Grbl will set by default the entire machine space into negative space, as is typical
 // for professional CNC machines, regardless of where the limit switches are located. Uncomment this
@@ -211,7 +217,16 @@
   // Only enable the following line if you have - (min) limit switches attached
   //#define INVERT_MIN_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
   // Only enable the following line if you have + (max) limit switches attached
-  //#define INVERT_MAX_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))  
+  //#define INVERT_MAX_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS) | (1<<Z_AXIS))
+#endif
+
+// Pyuscope/TMC2209 specific limit switch invert setting:
+#ifdef DEFAULTS_RAMPS_BOARD_PYUSCOPE
+  // TMC2209 DIAG is open-drain active-LOW (stall = pin floats HIGH), which is
+  // the opposite polarity to a normally-open switch (triggered = LOW). Invert
+  // the X and Y MIN inputs so that DIAG HIGH (stall) is seen as "limit triggered".
+  // Z uses a real switch and does not need inversion.
+  #define INVERT_MIN_LIMIT_PIN_MASK ((1<<X_AXIS) | (1<<Y_AXIS))
 #endif
 
 // Inverts the spindle enable pin from low-disabled/high-enabled to low-enabled/high-disabled. Useful
@@ -639,6 +654,59 @@
 // Paste CPU_MAP definitions here.
 
 // Paste default settings definitions here.
+
+
+/* ---------------------------------------------------------------------------------------
+   TMC2209 Sensorless Homing Configuration
+
+   Requires hardware wiring on MKS GEN V1.4 AUX-2 connector:
+     X axis: 1k between D40(TX) and A9(RX); jumper from X driver MS3 to A9
+     Y axis: 1k between A5(TX) and A10(RX); jumper from Y driver MS3 to A10
+     X DIAG output wired to X MIN limit input (D3)
+     Y DIAG output wired to Y MIN limit input (D14)
+
+   The UART address (0-3) is set by the driver's MS1/MS2 pins.
+   Z axis retains its physical limit switch; no sensorless homing for Z.
+*/
+#ifdef CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
+  #define TMC2209_SENSORLESS_HOMING         // Master enable; comment out to disable
+
+  #define TMC2209_BAUD_RATE        19200    // Software UART baud rate (chip auto-detects)
+  // TMC2209_X_ADDR / TMC2209_Y_ADDR: if defined, the address is used directly
+  // (no scan).  Leave undefined to auto-detect from MS1/MS2 pin state at startup.
+  // #define TMC2209_X_ADDR        0        // 0-3: fixed X driver UART address
+  // #define TMC2209_Y_ADDR        0        // 0-3: fixed Y driver UART address
+
+  // Motor current: 0-31 scale (31 = 100% of driver's Vref-set current)
+  // Microscope stages typically use small motors; start conservative and tune up.
+  #define TMC2209_IRUN             16       // Run current (~50% of max)
+  #define TMC2209_IHOLD            4        // Hold current (~12%); reduces heat/vibration
+
+  // TCOOLTHRS: upper velocity threshold for stallGuard DIAG output.
+  // stallGuard4 fires DIAG when: TCOOLTHRS >= TSTEP > TPWMTHRS
+  // 0xFFFFF = no upper speed limit, so stallGuard fires at any speed during homing.
+  #define TMC2209_TCOOLTHRS        0xFFFFF
+
+  // TPWMTHRS: TSTEP threshold below which StealthChop is active (higher = StealthChop
+  // at faster speeds).  During homing, TPWMTHRS is set to 0 so that the DIAG
+  // condition (TSTEP > TPWMTHRS) is satisfied at all speeds.  en_SpreadCycle is
+  // kept clear because TMC2209 StallGuard4 only works in StealthChop mode.
+  // ~300 = StealthChop (quiet) below ~750 mm/min at 3200 steps/mm.
+  #define TMC2209_TPWMTHRS_NORMAL  300
+
+  // Default stallGuard thresholds: 0-255, higher = less sensitive (harder stall needed).
+  // These are EEPROM defaults only; tune at runtime with $40/$41 (X) and $42/$43 (Y).
+  // Light microscope stages stall at lower forces; start low and increase if false-stalling.
+  #define DEFAULT_TMC_X_SEEK_SGTHRS  30    // $40  X fast-approach threshold
+  #define DEFAULT_TMC_X_FEED_SGTHRS  60    // $41  X slow-locate threshold (more sensitive)
+  #define DEFAULT_TMC_Y_SEEK_SGTHRS  30    // $42  Y fast-approach threshold
+  #define DEFAULT_TMC_Y_FEED_SGTHRS  60    // $43  Y slow-locate threshold
+
+  // If defined, homing is blocked (ALARM:10) when any TMC2209 axis driver fails to
+  // communicate at startup. Comment out to allow homing to proceed regardless (the
+  // DIAG/limit pin will still be read, so a mis-wired driver just won't trigger stall).
+  #define TMC2209_ALARM_ON_FAIL
+#endif // CPU_MAP_2560_RAMPS_BOARD_PYUSCOPE
 
 
 #endif

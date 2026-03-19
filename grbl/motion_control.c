@@ -218,21 +218,69 @@ void mc_homing_cycle(uint8_t cycle_mask)
 
   limits_disable(); // Disable hard limits pin change register for cycle duration
 
+  // If TMC2209 UART comms failed at init, block homing rather than proceed silently.
+  #if defined(TMC2209_SENSORLESS_HOMING) && defined(TMC2209_ALARM_ON_FAIL)
+    if (!tmc2209_axis_ok(X_AXIS) || !tmc2209_axis_ok(Y_AXIS)) {
+      system_set_exec_alarm(EXEC_ALARM_TMC2209_FAIL);
+      return;
+    }
+  #endif
+
   // -------------------------------------------------------------------------------------
   // Perform homing routine. NOTE: Special motion case. Only system reset works.
-  
+
   #ifdef HOMING_SINGLE_AXIS_COMMANDS
-    if (cycle_mask) { limits_go_home(cycle_mask); } // Perform homing cycle based on mask.
-    else
+    if (cycle_mask) {
+      // Single-axis homing ($HX/$HY/$HZ): arm stallGuard if applicable, then home.
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (cycle_mask & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+        if (cycle_mask & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+        #ifdef DEBUG
+          report_realtime_debug();
+        #endif
+      #endif
+      limits_go_home(cycle_mask);
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (cycle_mask & (1<<X_AXIS)) { tmc2209_homing_end(X_AXIS); }
+        if (cycle_mask & (1<<Y_AXIS)) { tmc2209_homing_end(Y_AXIS); }
+      #endif
+    } else
   #endif
   {
     // Search to engage all axes limit switches at faster homing seek rate.
+    #ifdef TMC2209_SENSORLESS_HOMING
+      if (HOMING_CYCLE_0 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+      if (HOMING_CYCLE_0 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #ifdef DEBUG
+        report_realtime_debug(); // Print GCONF/SG/DRV state after homing_start (before inner loop silences output)
+      #endif
+    #endif
     limits_go_home(HOMING_CYCLE_0);  // Homing cycle 0
+    #ifdef TMC2209_SENSORLESS_HOMING
+      tmc2209_homing_end(X_AXIS);
+      tmc2209_homing_end(Y_AXIS);
+    #endif
     #ifdef HOMING_CYCLE_1
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (HOMING_CYCLE_1 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+        if (HOMING_CYCLE_1 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #endif
       limits_go_home(HOMING_CYCLE_1);  // Homing cycle 1
+      #ifdef TMC2209_SENSORLESS_HOMING
+        tmc2209_homing_end(X_AXIS);
+        tmc2209_homing_end(Y_AXIS);
+      #endif
     #endif
     #ifdef HOMING_CYCLE_2
+      #ifdef TMC2209_SENSORLESS_HOMING
+        if (HOMING_CYCLE_2 & (1<<X_AXIS)) { tmc2209_homing_start(X_AXIS); }
+        if (HOMING_CYCLE_2 & (1<<Y_AXIS)) { tmc2209_homing_start(Y_AXIS); }
+      #endif
       limits_go_home(HOMING_CYCLE_2);  // Homing cycle 2
+      #ifdef TMC2209_SENSORLESS_HOMING
+        tmc2209_homing_end(X_AXIS);
+        tmc2209_homing_end(Y_AXIS);
+      #endif
     #endif
   }
 

@@ -509,6 +509,16 @@ void tmc2209_set_sgthrs(uint8_t axis, uint8_t phase)
         (uint32_t)settings.tmc_sgthrs[axis][phase]);
 }
 
+void tmc2209_clear_stall(uint8_t axis)
+{
+    if (axis > 1) { return; }
+    // The TMC2209 latches a stall error on DIAG until ENN is pulsed high.
+    // Briefly disable (ENN high) then re-enable (ENN low) to clear the latch.
+    STEPPER_DISABLE_PORT(axis) |=  (1 << STEPPER_DISABLE_BIT(axis));
+    TMC_L2(TMC_CYCLES_5US);   // ~5 µs — enough for the IC to register the edge
+    STEPPER_DISABLE_PORT(axis) &= ~(1 << STEPPER_DISABLE_BIT(axis));
+}
+
 void tmc2209_homing_end(uint8_t axis)
 {
     if (axis > 1) { return; }

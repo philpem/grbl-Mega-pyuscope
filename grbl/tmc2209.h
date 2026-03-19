@@ -102,6 +102,10 @@ void tmc2209_homing_start(uint8_t axis);
 // Called by limits_go_home() at the seek→locate phase transition.
 void tmc2209_set_sgthrs(uint8_t axis, uint8_t phase);
 
+// Pulse ENN high then low to clear the TMC2209 stall latch after a stallGuard
+// trigger. Must be called before attempting further motion on the axis.
+void tmc2209_clear_stall(uint8_t axis);
+
 // Restore normal operation after homing: disable stallGuard (TCOOLTHRS=0,
 // SGTHRS=0) and restore TPWMTHRS to TMC2209_TPWMTHRS_NORMAL.
 void tmc2209_homing_end(uint8_t axis);
